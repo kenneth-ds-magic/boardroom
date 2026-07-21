@@ -4,7 +4,7 @@ export function getUser() { return auth?.user || null }
 export function logout() { auth = null; sessionStorage.removeItem('boardroom.auth') }
 
 export async function login(email, password) {
-  const res = await fetch('/api/auth/login', {
+  const res = await fetch('/boardroom/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password })
   })
@@ -15,7 +15,7 @@ export async function login(email, password) {
 }
 
 export async function api(path, options = {}) {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`/boardroom/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -58,7 +58,7 @@ export async function uploadPaper(file, { meetingId, paperId, agendaItemId, titl
   })
   for (let i = 0; i < totalChunks; i++) {
     const blob = file.slice(i * CHUNK, Math.min(file.size, (i + 1) * CHUNK))
-    const res = await fetch(`/api/papers/uploads/${sessionId}/chunks/${i}`, {
+    const res = await fetch(`/boardroom/api/papers/uploads/${sessionId}/chunks/${i}`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/octet-stream' },
       body: blob
