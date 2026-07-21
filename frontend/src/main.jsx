@@ -25,6 +25,10 @@ function Shell({ children }) {
         </Link>
         {user && (
           <div className="who">
+            <>
+              <Link to="/contacts" style={{ marginRight: 12 }}>Manage contacts</Link>
+              {' · '}
+            </>
             {user.role === 'Admin' && (
               <>
                 <Link to="/users" style={{ marginRight: 12 }}>Manage users</Link>
