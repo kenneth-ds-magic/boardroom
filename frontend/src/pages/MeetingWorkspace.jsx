@@ -237,7 +237,7 @@ function PapersTab({ m, canManage, onChanged, say }) {
     try {
       const authData = JSON.parse(sessionStorage.getItem('boardroom.auth') || 'null')
       const token = authData?.token
-      const response = await fetch(`/api/papers/${paperId}/download`, {
+      const response = await fetch(`/boardroom/api/papers/${paperId}/download`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
       if (!response.ok) throw new Error('Download failed')
