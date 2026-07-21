@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard.jsx'
 import MeetingWorkspace from './pages/MeetingWorkspace.jsx'
 import Portal from './pages/Portal.jsx'
 import UsersManagement from './pages/UsersManagement.jsx'
-import ContactsManagement from './pages/ContactsManagement.jsx'
 import { getUser, logout } from './api.js'
 import './styles.css'
 
@@ -19,14 +18,12 @@ function Shell({ children }) {
       <header className="topbar">
         <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="brand">
-            Board<span>Room</span> · Minute Book
             {user?.companyName && <span style={{ color: 'var(--ink-soft)', fontWeight: 400, marginLeft: 8 }}>&middot; {user.companyName}</span>}
+            Board<span>Room</span> · Minute Book
           </div>
         </Link>
         {user && (
           <div className="who">
-            <Link to="/contacts" style={{ marginRight: 12 }}>Manage contacts</Link>
-            {' · '}
             {user.role === 'Admin' && (
               <>
                 <Link to="/users" style={{ marginRight: 12 }}>Manage users</Link>
@@ -49,7 +46,7 @@ function RequireAuth({ children }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/boardroom">
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -57,7 +54,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <Route path="/" element={<RequireAuth><Shell><Dashboard /></Shell></RequireAuth>} />
         <Route path="/meetings/:id" element={<RequireAuth><Shell><MeetingWorkspace /></Shell></RequireAuth>} />
         <Route path="/users" element={<RequireAuth><Shell><UsersManagement /></Shell></RequireAuth>} />
-        <Route path="/contacts" element={<RequireAuth><Shell><ContactsManagement /></Shell></RequireAuth>} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
