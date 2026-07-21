@@ -16,7 +16,7 @@ export default function Register() {
     if (f.password.length < 8) return setError('Password must be at least 8 characters.')
     setBusy(true)
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch('boardroom/api/auth/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyName: f.companyName, registrationDetails: f.registrationDetails,
