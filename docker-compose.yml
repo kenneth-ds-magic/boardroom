@@ -1,0 +1,66 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: boardroom
+      POSTGRES_USER: boardroom
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boardroom"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=boardroom;Username=boardroom;Password=${DB_PASSWORD}"
+      Jwt__Key: ${JWT_KEY:?set a 32+ char secret in .env}
+      App__BaseUrl: ${APP_BASE_URL:-http://localhost:8088}
+      App__FileStorageRoot: /var/boardroom/files
+    volumes:
+      - filestore:/var/boardroom/files   # dedicated storage outside the web root
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "8088:80"
+
+  # Nightly pg_dump + file store snapshot, 14-day retention
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+    volumes:
+      - backups:/backups
+      - filestore:/var/boardroom/files:ro
+    entrypoint: >
+      sh -c 'while true; do
+        ts=$$(date +%Y%m%d-%H%M);
+        pg_dump -h db -U boardroom boardroom | gzip > /backups/db-$$ts.sql.gz;
+        tar czf /backups/files-$$ts.tar.gz -C /var/boardroom files;
+        find /backups -type f -mtime +14 -delete;
+        sleep 86400;
+      done'
+
+  # Mail transport is configured per company inside the app (Admin -> Mail settings).
+  # An optional self-hosted Postal MTA below can be the server companies point at,
+  # or use any transactional SMTP endpoint (Postmark, SES, Mailgun).
+  # postal:
+  #   image: ghcr.io/postalserver/postal:latest
+  #   ...see https://docs.postalserver.io for full multi-container setup
+
+volumes:
+  pgdata:
+  filestore:
+  backups:
