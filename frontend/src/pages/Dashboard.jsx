@@ -69,7 +69,7 @@ export default function Dashboard() {
                 <td data-label="Action">{a.description}</td>
                 <td data-label="Due">{a.dueDate ? new Date(a.dueDate).toLocaleDateString() : '—'}</td>
                 <td data-label="Meeting" className="docket-sm">{a.meetingCode}</td>
-                <td data-label=""><button className="btn small" onClick={async () => { await api(`/actions/${a.id}/complete`, { method: 'POST' }); load() }}>Mark complete</button></td>
+                <td data-label="" style={{ whiteSpace: 'nowrap' }}><button className="btn small" onClick={async () => { await api(`/actions/${a.id}/complete`, { method: 'POST' }); load() }}>Mark complete</button></td>
               </tr>
             ))}
             {actions.length === 0 && <tr><td colSpan="4" style={{ color: 'var(--ink-soft)' }}>Nothing outstanding. Well done.</td></tr>}
