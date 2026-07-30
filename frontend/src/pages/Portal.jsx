@@ -5,18 +5,20 @@ import { useParams } from 'react-router-dom'
  * Landing page for personalized secure links from emails.
  * Paper links stream the file directly; meeting/minutes links render a read-only view.
  */
+const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+
 export default function Portal() {
   const { token } = useParams()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`/api/portal/${token}`).then(async res => {
+    fetch(`${BASE}/api/portal/${token}`).then(async res => {
       const ct = res.headers.get('content-type') || ''
       if (!res.ok) throw new Error((await res.json()).error || 'Link invalid')
       if (!ct.includes('application/json')) {
         // It's a file download — re-navigate so the browser handles it
-        window.location.href = `/api/portal/${token}`
+        window.location.href = `${BASE}/api/portal/${token}`
         return
       }
       setData(await res.json())

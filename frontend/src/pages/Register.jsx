@@ -17,7 +17,7 @@ export default function Register() {
     }
     setError(''); setBusy(true)
     try {
-      const res = await fetch('/boardroom/api/auth/register', {
+      const res = await fetch('/api/auth/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Registration failed')

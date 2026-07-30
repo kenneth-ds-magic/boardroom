@@ -1,3 +1,5 @@
+const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+
 let auth = JSON.parse(sessionStorage.getItem('boardroom.auth') || 'null')
 
 export function getUser() { return auth?.user || null }
@@ -8,7 +10,7 @@ function persist() { sessionStorage.setItem('boardroom.auth', JSON.stringify(aut
 
 /** Step 1: verify credentials. Returns { user, companies, selectToken } — no workspace JWT yet. */
 export async function login(email, password) {
-  const res = await fetch('/boardroom/api/auth/login', {
+  const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password })
   })
@@ -18,7 +20,7 @@ export async function login(email, password) {
 
 /** Step 2: exchange the credential proof for a workspace JWT bound to one company. */
 export async function selectWorkspace(pending, companyId) {
-  const res = await fetch('/boardroom/api/auth/token', {
+  const res = await fetch(`${BASE}/api/auth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pending.selectToken || auth?.token}` },
     body: JSON.stringify({ userId: pending.user.id, companyId })
@@ -33,7 +35,7 @@ export async function selectWorkspace(pending, companyId) {
 /** Header switcher: swap to another company without signing out, then reload state. */
 export async function switchCompany(companyId) {
   if (!auth) return
-  const res = await fetch('/boardroom/api/auth/token', {
+  const res = await fetch(`${BASE}/api/auth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
     body: JSON.stringify({ userId: auth.user.id, companyId })
@@ -42,11 +44,11 @@ export async function switchCompany(companyId) {
   const data = await res.json()
   auth = { ...auth, token: data.token, user: data.user }
   persist()
-  window.location.href = '/'   // reload dashboard/state under the new company context
+  window.location.href = `${BASE}/`   // reload dashboard/state under the new company context
 }
 
 export async function api(path, options = {}) {
-  const res = await fetch(`/boardroom/api${path}`, {
+  const res = await fetch(`${BASE}/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +56,7 @@ export async function api(path, options = {}) {
       ...options.headers
     }
   })
-  if (res.status === 401) { logout(); location.href = '/login'; return }
+  if (res.status === 401) { logout(); window.location.href = `${BASE}/login`; return }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Request failed (${res.status})`)
   const text = await res.text()
   return text ? JSON.parse(text) : null
@@ -62,7 +64,7 @@ export async function api(path, options = {}) {
 
 /** Authenticated paper download: fetch as blob with the JWT header, then trigger save. */
 export async function downloadPaper(paperId, fileName) {
-  const res = await fetch(`/boardroom/api/papers/${paperId}/download`, {
+  const res = await fetch(`${BASE}/api/papers/${paperId}/download`, {
     headers: { Authorization: `Bearer ${auth.token}` }
   })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Download failed')
@@ -88,7 +90,7 @@ export async function uploadPaper(file, { meetingId, paperId, agendaItemId, titl
   })
   for (let i = 0; i < totalChunks; i++) {
     const blob = file.slice(i * CHUNK, Math.min(file.size, (i + 1) * CHUNK))
-    const res = await fetch(`/boardroom/api/papers/uploads/${sessionId}/chunks/${i}`, {
+    const res = await fetch(`${BASE}/api/papers/uploads/${sessionId}/chunks/${i}`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/octet-stream' },
       body: blob
@@ -107,7 +109,7 @@ export async function uploadTempMinutesPdf(meetingId, pdfBlob) {
   if (!auth?.token) throw new Error('Not authenticated')
   const formData = new FormData()
   formData.append('file', pdfBlob, `Minutes_${meetingId}.pdf`)
-  const res = await fetch(`/boardroom/api/meetings/${meetingId}/minutes/temp-pdf`, {
+  const res = await fetch(`${BASE}/api/meetings/${meetingId}/minutes/temp-pdf`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.token}` },
     body: formData
