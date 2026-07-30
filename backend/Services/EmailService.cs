@@ -181,13 +181,12 @@ public class SmtpEmailService : IEmailService
         }
     }
 
-    /// <summary>Shared SMTP dispatch — also used by the mail-settings test endpoint.</summary>
     public static async Task SendViaSmtpAsync(ResolvedMailSettings s, MimeMessage msg, CancellationToken ct)
     {
         using var client = new SmtpClient();
         client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-        await client.ConnectAsync(s.Host, s.Port,
-            s.Port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTlsWhenAvailable, ct);
+        var options = s.Port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.Auto;
+        await client.ConnectAsync(s.Host, s.Port, options, ct);
         if (!string.IsNullOrEmpty(s.Username))
             await client.AuthenticateAsync(s.Username, s.Password, ct);
         await client.SendAsync(msg, ct);
