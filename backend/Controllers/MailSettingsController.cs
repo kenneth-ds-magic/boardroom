@@ -102,35 +102,49 @@ public class MailSettingsController : ControllerBase
     [HttpPost("test")]
     public async Task<IActionResult> Test(MailSettingsRequest req)
     {
-        var companyId = User.CompanyId();
-        var password = req.Password;
-        if (string.IsNullOrEmpty(password) || password == "********")
-        {
-            var stored = await _db.CompanyMailSettings.AsNoTracking().FirstOrDefaultAsync(x => x.CompanyId == companyId);
-            password = stored is null ? "" : _resolver.Unprotect(stored.PasswordEncrypted);
-        }
-        var settings = new ResolvedMailSettings(req.Provider, req.Host?.Trim() ?? "", req.Port, req.Username?.Trim() ?? "",
-            password ?? "", req.FromAddress.Trim(), string.IsNullOrWhiteSpace(req.FromName) ? "BoardRoom" : req.FromName.Trim());
-
-        var admin = await _db.Users.FindAsync(User.UserId());
-        if (admin is null) return NotFound();
-
         try
         {
-            var rcpt = EmailRecipient.ForUser(admin);
+            if (string.IsNullOrWhiteSpace(req.FromAddress))
+                return BadRequest(new { error = "Sender email (From address) is required." });
+            if ((req.Provider == "SMTP" || req.Provider == "Mailgun") && string.IsNullOrWhiteSpace(req.Host))
+                return BadRequest(new { error = $"{(req.Provider == "Mailgun" ? "Domain" : "Host")} is required." });
+
+            var companyId = User.CompanyId();
+            var password = req.Password;
+            if (string.IsNullOrEmpty(password) || password == "********")
+            {
+                var stored = await _db.CompanyMailSettings.AsNoTracking().FirstOrDefaultAsync(x => x.CompanyId == companyId);
+                password = stored is null ? "" : _resolver.Unprotect(stored.PasswordEncrypted);
+            }
+            var settings = new ResolvedMailSettings(
+                string.IsNullOrWhiteSpace(req.Provider) ? "SMTP" : req.Provider.Trim(),
+                req.Host?.Trim() ?? "",
+                req.Port,
+                req.Username?.Trim() ?? "",
+                password ?? "",
+                req.FromAddress.Trim(),
+                string.IsNullOrWhiteSpace(req.FromName) ? "BoardRoom" : req.FromName.Trim());
+
+            var admin = await _db.Users.FindAsync(User.UserId());
+            if (admin is null) return NotFound(new { error = "Admin user not found." });
+
+            var targetEmail = (!string.IsNullOrWhiteSpace(admin.Email) && !admin.Email.EndsWith("@example.com", StringComparison.OrdinalIgnoreCase))
+                ? admin.Email
+                : settings.FromAddress;
+            var rcpt = new EmailRecipient(admin.Id, null, admin.Name, targetEmail);
             var subject = $"BoardRoom test email — your {settings.Provider} settings work";
             var body = EmailTemplates.Layout($"{settings.Provider} test successful",
                 $"<p>This message was sent through your configured <strong>{settings.Provider}</strong> integration to verify your company's mail configuration.</p>",
                 Array.Empty<EmailLink>());
+
             await _email.SendTestAsync(settings, rcpt, subject, body, HttpContext.RequestAborted);
+            await _audit.LogAsync("mailsettings.test_ok", "CompanyMailSettings", null, new { req.Provider, req.Host, req.Port }, User.UserId());
+            return Ok(new { message = $"Test email sent to {targetEmail}." });
         }
         catch (Exception ex)
         {
             await _audit.LogAsync("mailsettings.test_failed", "CompanyMailSettings", null, new { req.Provider, req.Host, req.Port, error = ex.Message }, User.UserId());
             return BadRequest(new { error = $"Mail test failed: {ex.Message}" });
         }
-
-        await _audit.LogAsync("mailsettings.test_ok", "CompanyMailSettings", null, new { req.Provider, req.Host, req.Port }, User.UserId());
-        return Ok(new { message = $"Test email sent to {admin.Email}." });
     }
 }
