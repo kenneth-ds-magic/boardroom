@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -48,7 +48,7 @@ function Shell({ children }) {
             {isManagement && <Link to="/users">Manage users</Link>}
             {user.role === 'Admin' && <Link to="/mail-settings">Mail settings</Link>}
             <span className="who">{user.name} ({user.role})</span>
-            <a href="#" onClick={e => { e.preventDefault(); logout(); nav('/login') }}>Sign out</a>
+            <a href="#" onClick={e => { e.preventDefault(); logout(); window.location.href = '/login' }}>Sign out</a>
           </nav>
         )}
       </header>
@@ -58,12 +58,12 @@ function Shell({ children }) {
 }
 
 function RequireAuth({ children }) {
-  return getUser() ? children : <Login />
+  return getUser() ? children : <Navigate to="/login" replace />
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/boardroom">
+    <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />

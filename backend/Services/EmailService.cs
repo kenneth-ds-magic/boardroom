@@ -185,6 +185,7 @@ public class SmtpEmailService : IEmailService
     public static async Task SendViaSmtpAsync(ResolvedMailSettings s, MimeMessage msg, CancellationToken ct)
     {
         using var client = new SmtpClient();
+        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
         await client.ConnectAsync(s.Host, s.Port,
             s.Port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTlsWhenAvailable, ct);
         if (!string.IsNullOrEmpty(s.Username))

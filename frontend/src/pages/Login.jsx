@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { login, selectWorkspace } from '../api.js'
+import { Link, useLocation, useNavigate, Navigate } from 'react-router-dom'
+import { login, selectWorkspace, getUser } from '../api.js'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -11,6 +11,10 @@ export default function Login() {
   const nav = useNavigate()
   const registered = useLocation().state?.registered
 
+  if (getUser()) {
+    return <Navigate to="/" replace />
+  }
+
   async function submit(e) {
     e.preventDefault()
     setError(''); setBusy(true)
@@ -19,7 +23,7 @@ export default function Login() {
       if (result.companies.length === 1) {
         // Single workspace: enter it automatically.
         await selectWorkspace(result, result.companies[0].companyId)
-        nav('/')
+        window.location.href = '/'
       } else {
         setPending(result)   // multiple workspaces: let the user choose
       }
@@ -29,8 +33,10 @@ export default function Login() {
 
   async function enter(companyId) {
     setError(''); setBusy(true)
-    try { await selectWorkspace(pending, companyId); nav('/') }
-    catch (err) { setError(err.message) }
+    try {
+      await selectWorkspace(pending, companyId)
+      window.location.href = '/'
+    } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
 
@@ -54,7 +60,7 @@ export default function Login() {
           </div>
           {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
           <p style={{ textAlign: 'center', fontSize: '0.85rem', marginTop: 16 }}>
-            <a href="#" onClick={e => { e.preventDefault(); setPending(null) }}>Use a different account</a>
+            <a href="#" onClick={e => { e.preventDefault(); setPending(null); setError('') }}>Use a different account</a>
           </p>
         </div>
       </div>
@@ -70,9 +76,9 @@ export default function Login() {
         {registered && <p style={{ background: 'var(--bottle-tint)', color: 'var(--bottle)', padding: '8px 12px', borderRadius: 6, fontSize: '0.85rem' }}>Company registered. Sign in to enter your new workspace.</p>}
         <form onSubmit={submit}>
           <label htmlFor="email">Email</label>
-          <input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+          <input id="email" type="email" value={email} onChange={e => { setEmail(e.target.value); if (error) setError(''); }} required autoFocus />
           <label htmlFor="pw">Password</label>
-          <input id="pw" type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
+          <input id="pw" type="password" value={password} onChange={e => { setPassword(e.target.value); if (error) setError(''); }} required minLength={8} />
           {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</p>}
           <button className="btn" style={{ width: '100%', marginTop: 18 }} disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
