@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate, Navigate } from 'react-router-dom'
-import { login, selectWorkspace, getUser } from '../api.js'
+import { login, selectWorkspace, getUser, BASE } from '../api.js'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -23,7 +23,7 @@ export default function Login() {
       if (result.companies.length === 1) {
         // Single workspace: enter it automatically.
         await selectWorkspace(result, result.companies[0].companyId)
-        window.location.href = '/'
+        window.location.href = `${BASE}/`
       } else {
         setPending(result)   // multiple workspaces: let the user choose
       }
@@ -35,7 +35,7 @@ export default function Login() {
     setError(''); setBusy(true)
     try {
       await selectWorkspace(pending, companyId)
-      window.location.href = '/'
+      window.location.href = `${BASE}/`
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }

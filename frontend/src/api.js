@@ -1,4 +1,4 @@
-const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+export const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
 
 let auth = JSON.parse(sessionStorage.getItem('boardroom.auth') || 'null')
 

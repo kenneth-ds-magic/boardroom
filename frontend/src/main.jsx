@@ -9,7 +9,7 @@ import ContactsManagement from './pages/ContactsManagement.jsx'
 import UsersManagement from './pages/UsersManagement.jsx'
 import MailSettings from './pages/MailSettings.jsx'
 import Portal from './pages/Portal.jsx'
-import { getUser, getCompanies, switchCompany, logout } from './api.js'
+import { getUser, getCompanies, switchCompany, logout, BASE } from './api.js'
 import './styles.css'
 
 function Shell({ children }) {
@@ -48,7 +48,7 @@ function Shell({ children }) {
             {isManagement && <Link to="/users">Manage users</Link>}
             {user.role === 'Admin' && <Link to="/mail-settings">Mail settings</Link>}
             <span className="who">{user.name} ({user.role})</span>
-            <a href="#" onClick={e => { e.preventDefault(); logout(); window.location.href = '/login' }}>Sign out</a>
+            <a href="#" onClick={e => { e.preventDefault(); logout(); window.location.href = `${BASE}/login` }}>Sign out</a>
           </nav>
         )}
       </header>

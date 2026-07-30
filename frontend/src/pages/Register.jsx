@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { BASE } from '../api.js'
 
 export default function Register() {
   const [form, setForm] = useState({ companyName: '', registrationDetails: '', name: '', title: '', email: '', contactNumber: '', password: '' })
@@ -17,7 +18,7 @@ export default function Register() {
     }
     setError(''); setBusy(true)
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(`${BASE}/api/auth/register`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Registration failed')
