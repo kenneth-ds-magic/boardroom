@@ -13,12 +13,27 @@ services:
       interval: 10s
       retries: 5
 
+  minio:
+    image: ghcr.io/coollabsio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
   api:
     build: ./backend
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      minio:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -26,6 +41,11 @@ services:
       Jwt__Key: ${JWT_KEY:?set a 32+ char secret in .env}
       App__BaseUrl: ${APP_BASE_URL:-http://localhost:8088}
       App__FileStorageRoot: /var/boardroom/files
+      Minio__Endpoint: "minio:9000"
+      Minio__AccessKey: "${MINIO_ROOT_USER:-minioadmin}"
+      Minio__SecretKey: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      Minio__BucketName: "boardroom"
+      Minio__UseSSL: "false"
     volumes:
       - filestore:/var/boardroom/files   # dedicated storage outside the web root
 
@@ -55,14 +75,8 @@ services:
         sleep 86400;
       done'
 
-  # Mail transport is configured per company inside the app (Admin -> Mail settings).
-  # An optional self-hosted Postal MTA below can be the server companies point at,
-  # or use any transactional SMTP endpoint (Postmark, SES, Mailgun).
-  # postal:
-  #   image: ghcr.io/postalserver/postal:latest
-  #   ...see https://docs.postalserver.io for full multi-container setup
-
 volumes:
   pgdata:
   filestore:
   backups:
+  miniodata:

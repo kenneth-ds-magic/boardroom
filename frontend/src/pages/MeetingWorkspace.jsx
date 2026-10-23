@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, getUser, uploadPaper, downloadPaper, uploadTempMinutesPdf } from '../api.js'
 import MinutesEditor from '../components/MinutesEditor.jsx'
@@ -207,55 +207,61 @@ function AgendaTab({ meetingId, initialItems, editable, onSaved, attendees }) {
   }
 
   return (
-    <div className="card">
-      {items.map((a, i) => (
-        <div key={a.id || `new-${i}`} className="agenda-row">
-          <span className="agenda-num">{i + 1}</span>
-          {editable ? (
-            <>
-              <div className="agenda-edit-fields">
-                <div className="agenda-edit-main">
-                  <input className="agenda-input-title" value={a.title} onChange={set(i, 'title')} placeholder="Item title" />
-                </div>
-                <div className="agenda-edit-sub">
-                  <input className="agenda-input-presenter" value={a.presenter || ''} onChange={set(i, 'presenter')} placeholder="Presenter" />
-                  <div className="agenda-duration-wrap">
-                    <input type="number" className="agenda-input-duration" value={a.durationMinutes || ''} onChange={set(i, 'durationMinutes')} placeholder="min" />
+    <div className="card agenda-card">
+      <div className="agenda-items-container">
+        {items.map((a, i) => (
+          <div key={a.id || `new-${i}`} className="agenda-row">
+            <span className="agenda-num">{i + 1}</span>
+            {editable ? (
+              <>
+                <div className="agenda-edit-fields">
+                  <div className="agenda-edit-main">
+                    <input className="agenda-input-title" value={a.title} onChange={set(i, 'title')} placeholder="Item title" />
+                  </div>
+                  <div className="agenda-edit-sub">
+                    <input className="agenda-input-presenter" value={a.presenter || ''} onChange={set(i, 'presenter')} placeholder="Presenter" />
+                    <div className="agenda-duration-wrap">
+                      <input type="number" className="agenda-input-duration" value={a.durationMinutes || ''} onChange={set(i, 'durationMinutes')} placeholder="min" />
+                    </div>
                   </div>
                 </div>
+                <div className="agenda-item-actions">
+                  <button className="btn small ghost" type="button" onClick={() => move(i, -1)} title="Move up">↑</button>
+                  <button className="btn small ghost" type="button" onClick={() => move(i, 1)} title="Move down">↓</button>
+                  <button className="btn small ghost delete" type="button" onClick={() => setItems(items.filter((_, x) => x !== i))} title="Delete item" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="agenda-item-view">
+                <span className="agenda-item-title">{a.title}</span>
+                <div className="agenda-item-meta">
+                  {a.presenter && <em className="agenda-presenter-tag">— {a.presenter}</em>}
+                  {a.durationMinutes && <span className="pill">{a.durationMinutes} min</span>}
+                </div>
               </div>
-              <div className="agenda-item-actions">
-                <button className="btn small ghost" type="button" onClick={() => move(i, -1)} title="Move up">↑</button>
-                <button className="btn small ghost" type="button" onClick={() => move(i, 1)} title="Move down">↓</button>
-                <button className="btn small ghost delete" type="button" onClick={() => setItems(items.filter((_, x) => x !== i))} title="Delete item" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    <line x1="10" y1="11" x2="10" y2="17"></line>
-                    <line x1="14" y1="11" x2="14" y2="17"></line>
-                  </svg>
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="agenda-item-view">
-              <span className="agenda-item-title">{a.title}</span>
-              <div className="agenda-item-meta">
-                {a.presenter && <em className="agenda-presenter-tag">— {a.presenter}</em>}
-                {a.durationMinutes && <span className="pill">{a.durationMinutes} min</span>}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        ))}
+        {items.length === 0 && (
+          <p style={{ color: 'var(--ink-soft)', padding: '16px 0', textAlign: 'center' }}>
+            {editable ? 'No agenda items added yet. Click "+ Add item" below to begin.' : 'No agenda yet.'}
+          </p>
+        )}
+      </div>
       {editable && (
-        <div className="form-actions" style={{ justifyContent: 'space-between' }}>
-          <button className="btn ghost" type="button"
+        <div className="agenda-actions-bar">
+          <button className="btn ghost agenda-btn-add" type="button"
             onClick={() => setItems([...items, { title: '', presenter: '', durationMinutes: '' }])}>+ Add item</button>
-          <button className="btn" type="button" onClick={save}>Save agenda</button>
+          <button className="btn agenda-btn-save" type="button" onClick={save}>Save agenda</button>
         </div>
       )}
-      {!editable && items.length === 0 && <p style={{ color: 'var(--ink-soft)' }}>No agenda yet.</p>}
     </div>
   )
 }
@@ -265,11 +271,13 @@ function PapersTab({ meeting, editable, reload, say }) {
   const [progress, setProgress] = useState(null)
   const [title, setTitle] = useState('')
   const [versionTarget, setVersionTarget] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
   const [sending, setSending] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [paperToDelete, setPaperToDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const fileInputRef = useRef(null)
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -301,17 +309,45 @@ function PapersTab({ meeting, editable, reload, say }) {
     finally { setSending(false) }
   }
 
-  async function onFile(e) {
-    const file = e.target.files[0]
+  function handleFileSelect(e) {
+    const file = e.target.files?.[0]
     if (!file) return
+    setSelectedFile(file)
+    if (!title.trim()) {
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
+      setTitle(cleanName)
+    }
+  }
+
+  function handleClearFile() {
+    setSelectedFile(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  async function handleUpload() {
+    if (!selectedFile) {
+      say('Please choose a file to upload.')
+      return
+    }
     try {
-      await uploadPaper(file,
-        { meetingId: meeting.id, paperId: versionTarget || null, title: title || file.name },
-        setProgress)
-      setProgress(null); setTitle(''); setVersionTarget('')
+      await uploadPaper(
+        selectedFile,
+        { meetingId: meeting.id, paperId: versionTarget || null, title: title.trim() || selectedFile.name },
+        setProgress
+      )
+      setProgress(null)
+      setSelectedFile(null)
+      setTitle('')
+      setVersionTarget('')
+      if (fileInputRef.current) fileInputRef.current.value = ''
       reload()
       setShowSuccessModal(true)
-    } catch (err) { setProgress(null); say(err.message) }
+    } catch (err) {
+      setProgress(null)
+      say(err.message)
+    }
   }
 
   function grab(p) {
@@ -371,7 +407,11 @@ function PapersTab({ meeting, editable, reload, say }) {
           <div className="grid2">
             <div>
               <label>Paper title</label>
-              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Q3 Financial Report" />
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="e.g. Q3 Financial Report"
+              />
             </div>
             <div>
               <label>New version of…</label>
@@ -381,9 +421,77 @@ function PapersTab({ meeting, editable, reload, say }) {
               </select>
             </div>
           </div>
-          <input type="file" onChange={onFile} />
-          {progress !== null && <progress value={progress} max="1" style={{ width: '100%' }} />}
-          <p style={{ fontSize: '0.8rem', color: 'var(--ink-soft)' }}>
+
+          <div className="paper-upload-controls">
+            <div className="paper-file-picker">
+              <input
+                ref={fileInputRef}
+                type="file"
+                id="paper-file-input"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+                disabled={progress !== null}
+              />
+              {!selectedFile ? (
+                <div className="paper-choose-file-row">
+                  <label htmlFor="paper-file-input" className="btn ghost paper-choose-file-btn">
+                    <span>📎</span> Choose file…
+                  </label>
+                  <span className="paper-file-hint">Select a PDF, DOCX, or board presentation</span>
+                </div>
+              ) : (
+                <div className="paper-selected-file-card">
+                  <div className="paper-selected-file-info">
+                    <span className="paper-file-icon">📄</span>
+                    <div className="paper-file-meta">
+                      <strong className="paper-file-name">{selectedFile.name}</strong>
+                      <span className="paper-file-size">
+                        {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <label htmlFor="paper-file-input" className="btn ghost small" title="Change chosen file">
+                      Change
+                    </label>
+                    <button
+                      type="button"
+                      className="btn ghost small delete"
+                      onClick={handleClearFile}
+                      disabled={progress !== null}
+                      title="Clear chosen file"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="paper-upload-actions">
+              <button
+                type="button"
+                className="btn paper-btn-upload"
+                onClick={handleUpload}
+                disabled={!selectedFile || progress !== null}
+              >
+                <span>⬆️</span>
+                <span>{progress !== null ? `Uploading ${(progress * 100).toFixed(0)}%…` : 'Upload paper'}</span>
+              </button>
+            </div>
+          </div>
+
+          {progress !== null && (
+            <div className="paper-progress-wrap">
+              <div className="paper-progress-header">
+                <span>Uploading chunked file...</span>
+                <span>{(progress * 100).toFixed(0)}%</span>
+              </div>
+              <progress value={progress} max="1" style={{ width: '100%', height: 8 }} />
+            </div>
+          )}
+
+          <p style={{ fontSize: '0.8rem', color: 'var(--ink-soft)', margin: '12px 0 0' }}>
             Large files upload in chunks. Uploading onto an existing paper creates version v{'{n+1}'} and prompts to re-email the board.
           </p>
         </div>
@@ -586,14 +694,23 @@ function MinutesTab({ meeting, editable, reload, say }) {
           reload()
           say('Action point created — the assignee has been emailed.')
         }} />
-      <div className="form-actions no-print" style={{ justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn ghost" type="button" onClick={downloadPdf} disabled={downloading}>
-            {downloading ? 'Generating PDF...' : 'Download PDF 📄'}
+      <div className="minutes-actions-bar no-print">
+        <div className="minutes-actions-secondary">
+          <button className="btn ghost minutes-btn-action" type="button" onClick={downloadPdf} disabled={downloading}>
+            <span className="btn-icon">📄</span>
+            <span>{downloading ? 'Generating PDF...' : 'Download PDF'}</span>
           </button>
-          <button className="btn ghost" type="button" onClick={() => window.print()}>Print 🖨️</button>
+          <button className="btn ghost minutes-btn-action" type="button" onClick={() => window.print()}>
+            <span className="btn-icon">🖨️</span>
+            <span>Print</span>
+          </button>
         </div>
-        {editable && !finalized && <button className="btn" type="button" onClick={() => setShowFinalizeModal(true)}>Finalize and publish</button>}
+        {editable && !finalized && (
+          <button className="btn minutes-btn-finalize" type="button" onClick={() => setShowFinalizeModal(true)}>
+            <span className="btn-icon">📜</span>
+            <span>Finalize and publish</span>
+          </button>
+        )}
       </div>
 
       {showFinalizeModal && (

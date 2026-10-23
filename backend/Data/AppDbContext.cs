@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
     public DbSet<UploadSession> UploadSessions => Set<UploadSession>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -69,5 +70,10 @@ public class AppDbContext : DbContext
         b.Entity<AuditLog>().HasIndex(a => a.Timestamp);
         b.Entity<EmailLog>().Property(e => e.LinksJson).HasColumnType("jsonb");
         b.Entity<EmailLog>().HasIndex(e => e.Timestamp);
+
+        b.Entity<UserSession>().HasIndex(s => s.UserId);
+        b.Entity<UserSession>().HasIndex(s => new { s.IsRevoked, s.ExpiresAt });
+        b.Entity<UserSession>().HasOne(s => s.User).WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<UserSession>().HasOne(s => s.Company).WithMany().HasForeignKey(s => s.CompanyId).OnDelete(DeleteBehavior.SetNull);
     }
 }

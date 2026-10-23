@@ -14,6 +14,11 @@ public class Company
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
     public string RegistrationDetails { get; set; } = "";   // optional
+    public string? LogoObjectName { get; set; }              // MinIO object key
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? Address { get; set; }
+    public string? Website { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -226,4 +231,27 @@ public class UploadSession
     public string TempPath { get; set; } = "";
     public Guid CreatedById { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Active user login session for device tracking, concurrency control, and remote revocation.
+/// </summary>
+public class UserSession
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public Guid? CompanyId { get; set; }
+    public string DeviceType { get; set; } = "Desktop"; // Desktop | Mobile | Tablet
+    public string Browser { get; set; } = "";           // Chrome, Safari, Firefox, Edge, etc.
+    public string OperatingSystem { get; set; } = "";    // macOS, Windows, iOS, Android, Linux
+    public string IpAddress { get; set; } = "";
+    public string UserAgent { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastActiveAt { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAt { get; set; } = DateTime.UtcNow.AddDays(7);
+    public bool IsRevoked { get; set; } = false;
+    public DateTime? RevokedAt { get; set; }
+
+    public User? User { get; set; }
+    public Company? Company { get; set; }
 }

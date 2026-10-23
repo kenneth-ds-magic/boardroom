@@ -10,6 +10,7 @@ import Placeholder from '@tiptap/extension-placeholder'
  */
 export default function MinutesEditor({ initialHtml, agendaItems, attendees = [], onSave, onCreateAction, locked }) {
   const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [actionDraft, setActionDraft] = useState(null) // {description, assigneeUserId, assigneeContactId, dueDate, agendaItemId}
 
   const editor = useEditor({
@@ -45,38 +46,74 @@ export default function MinutesEditor({ initialHtml, agendaItems, attendees = []
     setActionDraft(null)
   }
 
+  async function handleSave() {
+    if (!dirty || saving) return
+    setSaving(true)
+    try {
+      await onSave(editor.getHTML())
+      setDirty(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <div>
+    <div className="minutes-editor-wrapper">
       {!locked && (
         <div className="editor-toolbar" role="toolbar" aria-label="Formatting">
-          <B label="B" title="Bold" on={editor.isActive('bold')} run={() => editor.chain().focus().toggleBold().run()} />
-          <B label="I" title="Italic" on={editor.isActive('italic')} run={() => editor.chain().focus().toggleItalic().run()} />
-          <B label="H2" on={editor.isActive('heading', { level: 2 })} run={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
-          <B label="H3" on={editor.isActive('heading', { level: 3 })} run={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} />
-          <B label="• List" on={editor.isActive('bulletList')} run={() => editor.chain().focus().toggleBulletList().run()} />
-          <B label="1. List" on={editor.isActive('orderedList')} run={() => editor.chain().focus().toggleOrderedList().run()} />
-          <B label="❝" title="Blockquote" on={editor.isActive('blockquote')} run={() => editor.chain().focus().toggleBlockquote().run()} />
-          <span style={{ width: 12 }} />
-          {agendaItems?.length > 0 && (
-            <select style={{ width: 'auto', padding: '3px 6px', fontSize: '0.85rem' }}
-              value="" onChange={e => { const it = agendaItems.find(a => a.id === e.target.value); if (it) insertAgendaItem(it) }}>
-              <option value="">Insert agenda item…</option>
-              {agendaItems.map((a, i) => <option key={a.id} value={a.id}>{i + 1}. {a.title}</option>)}
-            </select>
-          )}
-          <button type="button" className="on" style={{ marginLeft: 'auto' }} onClick={startAction}>+ Action point</button>
+          <div className="editor-toolbar-format-group">
+            <B label="B" title="Bold" on={editor.isActive('bold')} run={() => editor.chain().focus().toggleBold().run()} />
+            <B label="I" title="Italic" on={editor.isActive('italic')} run={() => editor.chain().focus().toggleItalic().run()} />
+            <B label="H2" on={editor.isActive('heading', { level: 2 })} run={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
+            <B label="H3" on={editor.isActive('heading', { level: 3 })} run={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} />
+            <B label="• List" on={editor.isActive('bulletList')} run={() => editor.chain().focus().toggleBulletList().run()} />
+            <B label="1. List" on={editor.isActive('orderedList')} run={() => editor.chain().focus().toggleOrderedList().run()} />
+            <B label="❝" title="Blockquote" on={editor.isActive('blockquote')} run={() => editor.chain().focus().toggleBlockquote().run()} />
+          </div>
+          <div className="editor-toolbar-tools-group">
+            {agendaItems?.length > 0 && (
+              <select
+                className="editor-toolbar-agenda-select"
+                value=""
+                onChange={e => { const it = agendaItems.find(a => a.id === e.target.value); if (it) insertAgendaItem(it) }}
+              >
+                <option value="">Insert agenda item…</option>
+                {agendaItems.map((a, i) => <option key={a.id} value={a.id}>{i + 1}. {a.title}</option>)}
+              </select>
+            )}
+            <button type="button" className="editor-btn-action-point" onClick={startAction}>
+              + Action point
+            </button>
+          </div>
         </div>
       )}
 
       <EditorContent editor={editor} className={locked ? 'minutes-readonly' : ''} />
 
       {!locked && (
-        <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-          <button className="btn" disabled={!dirty}
-            onClick={async () => { await onSave(editor.getHTML()); setDirty(false) }}>
-            Save minutes
-          </button>
-          {dirty && <span style={{ alignSelf: 'center', fontSize: '0.82rem', color: 'var(--ink-soft)' }}>Unsaved changes</span>}
+        <div className="editor-save-bar">
+          <div className="editor-save-bar-left">
+            <button
+              type="button"
+              className="btn minutes-btn-save"
+              disabled={!dirty || saving}
+              onClick={handleSave}
+            >
+              <span>💾</span>
+              <span>{saving ? 'Saving…' : 'Save minutes'}</span>
+            </button>
+          </div>
+          <div className="editor-status-indicator">
+            {dirty ? (
+              <span className="editor-status-badge dirty">
+                <span className="status-dot warning"></span> Unsaved changes
+              </span>
+            ) : (
+              <span className="editor-status-badge saved">
+                <span className="status-dot success"></span> All changes saved
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -118,7 +155,7 @@ export default function MinutesEditor({ initialHtml, agendaItems, attendees = []
               <input type="date" value={actionDraft.dueDate} onChange={e => setActionDraft(d => ({ ...d, dueDate: e.target.value }))} />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+          <div className="action-draft-buttons" style={{ marginTop: 14 }}>
             <button className="btn" onClick={saveAction} disabled={!actionDraft.description || (!actionDraft.assigneeUserId && !actionDraft.assigneeContactId)}>
               Create and notify assignee
             </button>

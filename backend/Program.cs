@@ -41,6 +41,7 @@ builder.Services.AddHttpClient();
 
 builder.Services.AddSingleton<IEventBus, ChannelEventBus>();
 builder.Services.AddSingleton<FileStorageService>();
+builder.Services.AddSingleton<MinioStorageService>();
 builder.Services.AddScoped<MailSettingsResolver>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<SecureLinkService>();
@@ -65,9 +66,39 @@ using (var scope = app.Services.CreateScope())
         db.Database.ExecuteSqlRaw(@"
             ALTER TABLE ""ActionPoints"" ALTER COLUMN ""AssigneeId"" DROP NOT NULL;
             ALTER TABLE ""ActionPoints"" ADD COLUMN IF NOT EXISTS ""ContactId"" uuid NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""LogoObjectName"" text NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Email"" text NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Phone"" text NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Address"" text NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Website"" text NULL;
+            CREATE TABLE IF NOT EXISTS ""UserSessions"" (
+                ""Id"" uuid NOT NULL PRIMARY KEY,
+                ""UserId"" uuid NOT NULL REFERENCES ""Users""(""Id"") ON DELETE CASCADE,
+                ""CompanyId"" uuid NULL REFERENCES ""Companies""(""Id"") ON DELETE SET NULL,
+                ""DeviceType"" text NOT NULL DEFAULT 'Desktop',
+                ""Browser"" text NOT NULL DEFAULT '',
+                ""OperatingSystem"" text NOT NULL DEFAULT '',
+                ""IpAddress"" text NOT NULL DEFAULT '',
+                ""UserAgent"" text NOT NULL DEFAULT '',
+                ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                ""LastActiveAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                ""ExpiresAt"" timestamp with time zone NOT NULL,
+                ""IsRevoked"" boolean NOT NULL DEFAULT FALSE,
+                ""RevokedAt"" timestamp with time zone NULL
+            );
+            CREATE INDEX IF NOT EXISTS ""IX_UserSessions_UserId"" ON ""UserSessions"" (""UserId"");
+            CREATE INDEX IF NOT EXISTS ""IX_UserSessions_IsRevoked_ExpiresAt"" ON ""UserSessions"" (""IsRevoked"", ""ExpiresAt"");
         ");
     }
     catch { /* Schema up to date */ }
+
+    try
+    {
+        var minio = scope.ServiceProvider.GetRequiredService<MinioStorageService>();
+        minio.EnsureBucketAsync().GetAwaiter().GetResult();
+    }
+    catch { /* MinIO init */ }
+
     Seed.Run(db);
 }
 
@@ -75,9 +106,9 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.UseCors();
 app.UseAuthentication();
 
-// Global active-status interceptor: on every authenticated request carrying a workspace token,
-// re-verify the membership is still Active. Suspending or firing a user therefore takes effect
-// on their very next request, even mid-session — the stale JWT is rejected with 401.
+// Global active-status and session interceptor:
+// 1. Validates that the device session (if tracked via sessionId claim) is still active and unrevoked.
+// 2. Re-verifies membership status is Active on every request — stale JWTs are immediately rejected.
 app.Use(async (ctx, next) =>
 {
     var user = ctx.User;
@@ -85,9 +116,37 @@ app.Use(async (ctx, next) =>
     {
         var companyClaim = user.FindFirstValue("companyId");
         var idClaim = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        var sessionClaim = user.FindFirstValue("sessionId");
+
         if (companyClaim is not null && idClaim is not null)
         {
             var db = ctx.RequestServices.GetRequiredService<AppDbContext>();
+
+            // 1. Session verification & liveness update
+            if (Guid.TryParse(sessionClaim, out var sessId))
+            {
+                var session = await db.UserSessions.FirstOrDefaultAsync(s => s.Id == sessId);
+                if (session is null || session.IsRevoked || session.ExpiresAt < DateTime.UtcNow)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await ctx.Response.WriteAsJsonAsync(new
+                    {
+                        error = "This session has been revoked or expired. Please sign in again."
+                    });
+                    return;
+                }
+
+                // Periodically touch LastActiveAt (throttled to every 2 minutes)
+                if (DateTime.UtcNow - session.LastActiveAt > TimeSpan.FromMinutes(2))
+                {
+                    session.LastActiveAt = DateTime.UtcNow;
+                    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+                    if (!string.IsNullOrEmpty(ip)) session.IpAddress = ip;
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            // 2. Membership status verification
             var status = await db.CompanyMemberships.AsNoTracking()
                 .Where(m => m.UserId == Guid.Parse(idClaim) && m.CompanyId == Guid.Parse(companyClaim))
                 .Select(m => (UserStatus?)m.Status).FirstOrDefaultAsync();

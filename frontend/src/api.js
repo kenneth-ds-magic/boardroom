@@ -4,7 +4,23 @@ let auth = JSON.parse(sessionStorage.getItem('boardroom.auth') || 'null')
 
 export function getUser() { return auth?.user || null }
 export function getCompanies() { return auth?.companies || [] }
-export function logout() { auth = null; sessionStorage.removeItem('boardroom.auth') }
+export function getSessionId() { return auth?.sessionId || null }
+
+export async function logout(skipServer = false) {
+  if (!skipServer && auth?.token) {
+    try {
+      await fetch(`${BASE}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          'Content-Type': 'application/json'
+        }
+      }).catch(() => {})
+    } catch {}
+  }
+  auth = null
+  sessionStorage.removeItem('boardroom.auth')
+}
 
 function persist() { sessionStorage.setItem('boardroom.auth', JSON.stringify(auth)) }
 
@@ -27,7 +43,7 @@ export async function selectWorkspace(pending, companyId) {
   })
   if (!res.ok) throw new Error((await res.json()).error || 'Could not enter workspace')
   const data = await res.json()
-  auth = { token: data.token, user: data.user, companies: pending.companies }
+  auth = { token: data.token, user: data.user, companies: pending.companies, sessionId: data.sessionId }
   persist()
   return data.user
 }
@@ -42,24 +58,56 @@ export async function switchCompany(companyId) {
   })
   if (!res.ok) throw new Error((await res.json()).error || 'Could not switch workspace')
   const data = await res.json()
-  auth = { ...auth, token: data.token, user: data.user }
+  auth = { ...auth, token: data.token, user: data.user, sessionId: data.sessionId || auth.sessionId }
   persist()
-  window.location.href = `${BASE}/`   // reload dashboard/state under the new company context
+  const path = window.location.pathname
+  if (path.includes('/meetings/')) {
+    window.location.href = `${BASE}/`
+  } else {
+    window.location.reload()
+  }
 }
 
 export async function api(path, options = {}) {
+  const isPostOrPut = options.method === 'POST' || options.method === 'PUT'
+  const headers = {
+    ...(isPostOrPut ? { 'Content-Type': 'application/json' } : {}),
+    ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}),
+    ...options.headers
+  }
+  const body = options.body !== undefined ? options.body : (isPostOrPut ? '{}' : undefined)
   const res = await fetch(`${BASE}/api${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}),
-      ...options.headers
-    }
+    headers,
+    body
   })
-  if (res.status === 401) { logout(); window.location.href = `${BASE}/login`; return }
+  if (res.status === 401) {
+    let errJson = {}
+    try { errJson = await res.json() } catch {}
+    await logout(true)
+    const errText = errJson?.error || ''
+    const reason = errText.includes('revoked') ? 'revoked' : (errText.includes('expired') ? 'expired' : 'unauthorized')
+    window.location.href = `${BASE}/login?reason=${reason}`
+    return
+  }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Request failed (${res.status})`)
   const text = await res.text()
   return text ? JSON.parse(text) : null
+}
+
+/** List active authenticated device sessions */
+export async function getSessions() {
+  return api('/auth/sessions')
+}
+
+/** Revoke a specific device session */
+export async function revokeSession(sessionId) {
+  return api(`/auth/sessions/${sessionId}/revoke`, { method: 'POST' })
+}
+
+/** Revoke all other device sessions */
+export async function revokeOtherSessions() {
+  return api('/auth/sessions/revoke-others', { method: 'POST' })
 }
 
 /** Authenticated paper download: fetch as blob with the JWT header, then trigger save. */
@@ -121,3 +169,60 @@ export async function uploadTempMinutesPdf(meetingId, pdfBlob) {
     throw new Error(errJson.error || errText || `Upload temp PDF failed (${res.status})`)
   }
 }
+
+/** Get active company details & branding info (or for a specified company). */
+export async function getCompany(companyId) {
+  return api(companyId ? `/company?companyId=${companyId}` : '/company')
+}
+
+
+/** Update active company details (Admin only). */
+export async function updateCompany(data) {
+  return api('/company', {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+}
+
+/** Create a new company workspace (Admin only). */
+export async function createCompany(data) {
+  const res = await api('/company', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+  if (res.companies && auth) {
+    auth = { ...auth, companies: res.companies }
+    persist()
+  }
+  return res
+}
+
+
+/** Upload company logo to MinIO object storage (Admin only). */
+export async function uploadCompanyLogo(file, companyId) {
+  if (!auth?.token) throw new Error('Not authenticated')
+  const formData = new FormData()
+  formData.append('file', file)
+  const q = companyId ? `?companyId=${encodeURIComponent(companyId)}` : ''
+  const res = await fetch(`${BASE}/api/company/logo${q}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}` },
+    body: formData
+  })
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    let errJson = {}
+    try { errJson = JSON.parse(errText) } catch {}
+    throw new Error(errJson.error || errText || `Upload logo failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** Remove company logo from MinIO (Admin only). */
+export async function deleteCompanyLogo(companyId) {
+  const q = companyId ? `?companyId=${encodeURIComponent(companyId)}` : ''
+  return api(`/company/logo${q}`, {
+    method: 'DELETE'
+  })
+}
+

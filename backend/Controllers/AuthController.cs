@@ -115,7 +115,8 @@ public class AuthController : ControllerBase
             {
                 companyId = m.CompanyId,
                 companyName = m.Company!.Name,
-                role = m.Role.ToString()
+                role = m.Role.ToString(),
+                hasLogo = !string.IsNullOrEmpty(m.Company!.LogoObjectName)
             }),
             // Short-lived proof of the credential check, required by /token so nobody can
             // mint a workspace JWT for an arbitrary userId.
@@ -141,15 +142,163 @@ public class AuthController : ControllerBase
         if (m.Status == UserStatus.Suspended) return Unauthorized(new { error = "Your account is suspended." });
         if (m.Status == UserStatus.Fired) return Unauthorized(new { error = "Your account is fired." });
 
-        await _audit.LogAsync("auth.workspace_selected", "Company", m.CompanyId, new { role = m.Role.ToString() }, m.UserId,
-            HttpContext.Connection.RemoteIpAddress?.ToString());
+        // Session creation or reuse
+        var existingSessionId = User.SessionId();
+        UserSession? session = null;
+        if (existingSessionId.HasValue)
+        {
+            session = await _db.UserSessions.FirstOrDefaultAsync(s => s.Id == existingSessionId.Value && s.UserId == req.UserId && !s.IsRevoked);
+        }
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var ua = Request.Headers.UserAgent.ToString();
+        var clientInfo = UserAgentParser.Parse(ua);
+
+        if (session is not null)
+        {
+            session.CompanyId = req.CompanyId;
+            session.LastActiveAt = DateTime.UtcNow;
+            session.IpAddress = ip;
+            if (!string.IsNullOrWhiteSpace(ua))
+            {
+                session.UserAgent = ua;
+                session.Browser = clientInfo.Browser;
+                session.OperatingSystem = clientInfo.OperatingSystem;
+                session.DeviceType = clientInfo.DeviceType;
+            }
+        }
+        else
+        {
+            session = new UserSession
+            {
+                UserId = req.UserId,
+                CompanyId = req.CompanyId,
+                DeviceType = clientInfo.DeviceType,
+                Browser = clientInfo.Browser,
+                OperatingSystem = clientInfo.OperatingSystem,
+                IpAddress = ip,
+                UserAgent = ua,
+                CreatedAt = DateTime.UtcNow,
+                LastActiveAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                IsRevoked = false
+            };
+            _db.UserSessions.Add(session);
+        }
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("auth.workspace_selected", "Company", m.CompanyId, new { role = m.Role.ToString(), sessionId = session.Id }, m.UserId, ip);
         return Ok(new
         {
-            token = IssueJwt(m.User!, purposeSelect: false, m),
+            token = IssueJwt(m.User!, purposeSelect: false, m, session.Id),
+            sessionId = session.Id,
             user = new { id = m.UserId, name = m.User!.Name, email = m.User.Email,
                          role = m.Role.ToString(), title = m.Title,
                          companyId = m.CompanyId, companyName = m.Company!.Name }
         });
+    }
+
+    /// <summary>Lists active authenticated device sessions for the caller.</summary>
+    [HttpGet("sessions")]
+    [Authorize]
+    public async Task<IActionResult> GetSessions()
+    {
+        var userId = User.UserId();
+        var currentSessionId = User.SessionId();
+
+        var sessions = await _db.UserSessions.AsNoTracking()
+            .Where(s => s.UserId == userId && !s.IsRevoked && s.ExpiresAt > DateTime.UtcNow)
+            .OrderByDescending(s => s.LastActiveAt)
+            .Select(s => new
+            {
+                s.Id,
+                s.DeviceType,
+                s.Browser,
+                s.OperatingSystem,
+                s.IpAddress,
+                s.CreatedAt,
+                s.LastActiveAt,
+                isCurrent = currentSessionId.HasValue && s.Id == currentSessionId.Value
+            })
+            .ToListAsync();
+
+        return Ok(new
+        {
+            currentSessionId,
+            sessions
+        });
+    }
+
+    /// <summary>Revokes a specific device session.</summary>
+    [HttpPost("sessions/{id:guid}/revoke")]
+    [Authorize]
+    public async Task<IActionResult> RevokeSession(Guid id)
+    {
+        var userId = User.UserId();
+        var currentSessionId = User.SessionId();
+
+        var session = await _db.UserSessions.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
+        if (session is null) return NotFound(new { error = "Session not found." });
+
+        session.IsRevoked = true;
+        session.RevokedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("auth.session_revoked", "UserSession", id,
+            new { session.DeviceType, session.Browser, isCurrent = id == currentSessionId }, userId,
+            HttpContext.Connection.RemoteIpAddress?.ToString());
+
+        return Ok(new { success = true, isCurrent = id == currentSessionId });
+    }
+
+    /// <summary>Revokes all other active sessions for this user except current.</summary>
+    [HttpPost("sessions/revoke-others")]
+    [Authorize]
+    public async Task<IActionResult> RevokeOtherSessions()
+    {
+        var userId = User.UserId();
+        var currentSessionId = User.SessionId();
+
+        var others = await _db.UserSessions
+            .Where(s => s.UserId == userId && !s.IsRevoked && (!currentSessionId.HasValue || s.Id != currentSessionId.Value))
+            .ToListAsync();
+
+        foreach (var s in others)
+        {
+            s.IsRevoked = true;
+            s.RevokedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("auth.sessions_revoked_others", "User", userId,
+            new { revokedCount = others.Count }, userId,
+            HttpContext.Connection.RemoteIpAddress?.ToString());
+
+        return Ok(new { success = true, revokedCount = others.Count });
+    }
+
+    /// <summary>Logs out current user, revoking their active device session on the server.</summary>
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout()
+    {
+        var userId = User.UserId();
+        var currentSessionId = User.SessionId();
+
+        if (currentSessionId.HasValue)
+        {
+            var session = await _db.UserSessions.FirstOrDefaultAsync(s => s.Id == currentSessionId.Value && s.UserId == userId);
+            if (session is not null)
+            {
+                session.IsRevoked = true;
+                session.RevokedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+        }
+
+        await _audit.LogAsync("auth.logout", "User", userId, null, userId, HttpContext.Connection.RemoteIpAddress?.ToString());
+        return Ok(new { success = true });
     }
 
     /// <summary>Company-scoped unified directory: active members AND external contacts (isContact flag).</summary>
@@ -179,7 +328,7 @@ public class AuthController : ControllerBase
     private record DirectoryEntry(Guid? UserId, Guid? ContactId, string Name, string Email,
                                   string Title, string ContactNumber, string Role, bool IsContact);
 
-    private string IssueJwt(User user, bool purposeSelect, CompanyMembership? m = null)
+    private string IssueJwt(User user, bool purposeSelect, CompanyMembership? m = null, Guid? sessionId = null)
     {
         var claims = new List<Claim>
         {
@@ -192,6 +341,10 @@ public class AuthController : ControllerBase
         {
             claims.Add(new Claim(ClaimTypes.Role, m!.Role.ToString()));
             claims.Add(new Claim("companyId", m.CompanyId.ToString()));
+            if (sessionId.HasValue)
+            {
+                claims.Add(new Claim("sessionId", sessionId.Value.ToString()));
+            }
         }
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!));
         var token = new JwtSecurityToken(
@@ -208,4 +361,10 @@ public static class ClaimsExtensions
     public static Guid CompanyId(this ClaimsPrincipal p) => Guid.Parse(p.FindFirstValue("companyId")!);
     public static bool HasCompany(this ClaimsPrincipal p) => p.FindFirstValue("companyId") is not null;
     public static bool IsManagement(this ClaimsPrincipal p) => p.IsInRole("Admin") || p.IsInRole("Secretary");
+    public static bool IsAdmin(this ClaimsPrincipal p) => p.IsInRole("Admin");
+    public static Guid? SessionId(this ClaimsPrincipal p)
+    {
+        var s = p.FindFirstValue("sessionId");
+        return Guid.TryParse(s, out var id) ? id : null;
+    }
 }
