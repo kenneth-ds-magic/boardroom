@@ -19,6 +19,7 @@ public class Company
     public string? Phone { get; set; }
     public string? Address { get; set; }
     public string? Website { get; set; }
+    public bool HasCustomMail { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

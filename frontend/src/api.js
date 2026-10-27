@@ -175,6 +175,14 @@ export async function getCompany(companyId) {
   return api(companyId ? `/company?companyId=${companyId}` : '/company')
 }
 
+/** Toggle between company custom mail relay and system default mail relay (Environment variables) */
+export async function toggleCustomMail(hasCustomMail) {
+  return api('/mail-settings/toggle-custom', {
+    method: 'POST',
+    body: JSON.stringify({ hasCustomMail })
+  })
+}
+
 
 /** Update active company details (Admin only). */
 export async function updateCompany(data) {

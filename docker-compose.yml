@@ -46,6 +46,14 @@ services:
       Minio__SecretKey: "${MINIO_ROOT_PASSWORD:-minioadmin}"
       Minio__BucketName: "boardroom"
       Minio__UseSSL: "false"
+      # System Default Email Configuration (used when a company HasCustomMail is false)
+      Mail__Provider: "${MAIL_PROVIDER:-SMTP}"
+      Mail__Host: "${SMTP_HOST:-}"
+      Mail__Port: "${SMTP_PORT:-587}"
+      Mail__Username: "${SMTP_USERNAME:-}"
+      Mail__Password: "${SMTP_PASSWORD:-}"
+      Mail__FromAddress: "${SMTP_FROM_ADDRESS:-}"
+      Mail__FromName: "${SMTP_FROM_NAME:-BoardRoom}"
     volumes:
       - filestore:/var/boardroom/files   # dedicated storage outside the web root
 

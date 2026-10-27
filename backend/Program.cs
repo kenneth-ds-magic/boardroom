@@ -71,6 +71,7 @@ using (var scope = app.Services.CreateScope())
             ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Phone"" text NULL;
             ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Address"" text NULL;
             ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""Website"" text NULL;
+            ALTER TABLE ""Companies"" ADD COLUMN IF NOT EXISTS ""HasCustomMail"" boolean NOT NULL DEFAULT FALSE;
             CREATE TABLE IF NOT EXISTS ""UserSessions"" (
                 ""Id"" uuid NOT NULL PRIMARY KEY,
                 ""UserId"" uuid NOT NULL REFERENCES ""Users""(""Id"") ON DELETE CASCADE,

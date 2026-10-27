@@ -38,25 +38,110 @@ public interface IEmailService
 /// <summary>Resolved, decrypted SMTP / API settings ready for use.</summary>
 public record ResolvedMailSettings(string Provider, string Host, int Port, string Username, string Password, string FromAddress, string FromName);
 
-/// <summary>Resolves a company's mail configuration at runtime (Feature: per-company mail servers).</summary>
+/// <summary>Resolves a company's mail configuration at runtime: uses company settings when HasCustomMail is true, otherwise falls back to environment variables.</summary>
 public class MailSettingsResolver
 {
     public const string ProtectorPurpose = "BoardRoom.CompanyMailSettings.Password";
     private readonly AppDbContext _db;
     private readonly IDataProtector _protector;
+    private readonly IConfiguration _cfg;
+    private readonly ILogger<MailSettingsResolver> _log;
 
-    public MailSettingsResolver(AppDbContext db, IDataProtectionProvider dp)
-    { _db = db; _protector = dp.CreateProtector(ProtectorPurpose); }
+    public MailSettingsResolver(AppDbContext db, IDataProtectionProvider dp, IConfiguration cfg, ILogger<MailSettingsResolver> log)
+    {
+        _db = db;
+        _protector = dp.CreateProtector(ProtectorPurpose);
+        _cfg = cfg;
+        _log = log;
+    }
 
     public string Protect(string plaintext) => string.IsNullOrEmpty(plaintext) ? "" : _protector.Protect(plaintext);
     public string Unprotect(string cipher) => string.IsNullOrEmpty(cipher) ? "" : _protector.Unprotect(cipher);
 
+    /// <summary>
+    /// Resolves the system-wide default mail configuration from environment variables.
+    /// Supports standard .NET config (Mail:Host, Mail:Port, etc.) as well as standard SMTP env vars (SMTP_HOST, etc.).
+    /// </summary>
+    public ResolvedMailSettings? GetSystemDefaultSettings(string? fallbackFromName = null)
+    {
+        var provider = _cfg["Mail:Provider"]
+            ?? _cfg["MAIL_PROVIDER"]
+            ?? "SMTP";
+
+        var host = _cfg["Mail:Host"]
+            ?? _cfg["SMTP_HOST"]
+            ?? _cfg["MAIL_HOST"]
+            ?? "";
+
+        var portStr = _cfg["Mail:Port"]
+            ?? _cfg["SMTP_PORT"]
+            ?? _cfg["MAIL_PORT"]
+            ?? "587";
+        int.TryParse(portStr, out var port);
+        if (port <= 0) port = 587;
+
+        var username = _cfg["Mail:Username"]
+            ?? _cfg["SMTP_USERNAME"]
+            ?? _cfg["SMTP_USER"]
+            ?? _cfg["MAIL_USERNAME"]
+            ?? "";
+
+        var password = _cfg["Mail:Password"]
+            ?? _cfg["SMTP_PASSWORD"]
+            ?? _cfg["SMTP_PASS"]
+            ?? _cfg["MAIL_PASSWORD"]
+            ?? "";
+
+        var fromAddress = _cfg["Mail:FromAddress"]
+            ?? _cfg["SMTP_FROM_ADDRESS"]
+            ?? _cfg["SMTP_FROM_EMAIL"]
+            ?? _cfg["MAIL_FROM_ADDRESS"]
+            ?? _cfg["MAIL_FROM"]
+            ?? "";
+
+        var fromName = _cfg["Mail:FromName"]
+            ?? _cfg["SMTP_FROM_NAME"]
+            ?? _cfg["MAIL_FROM_NAME"]
+            ?? fallbackFromName
+            ?? "BoardRoom";
+
+        if (string.IsNullOrWhiteSpace(fromAddress))
+        {
+            return null;
+        }
+
+        if ((provider.Equals("SMTP", StringComparison.OrdinalIgnoreCase) || provider.Equals("Mailgun", StringComparison.OrdinalIgnoreCase))
+            && string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return new ResolvedMailSettings(provider, host, port, username, password, fromAddress, fromName);
+    }
+
     public async Task<ResolvedMailSettings?> ResolveAsync(Guid companyId, CancellationToken ct = default)
     {
-        var s = await _db.CompanyMailSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.CompanyId == companyId && x.IsActive, ct);
-        if (s is null) return null;
-        return new ResolvedMailSettings(s.Provider, s.Host, s.Port, s.Username, Unprotect(s.PasswordEncrypted), s.FromAddress, s.FromName);
+        var company = await _db.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.Id == companyId, ct);
+        if (company is not null && company.HasCustomMail)
+        {
+            var s = await _db.CompanyMailSettings.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == companyId && x.IsActive, ct);
+            if (s is not null && !string.IsNullOrWhiteSpace(s.FromAddress))
+            {
+                return new ResolvedMailSettings(s.Provider, s.Host, s.Port, s.Username, Unprotect(s.PasswordEncrypted), s.FromAddress, s.FromName);
+            }
+
+            _log.LogWarning("Company {CompanyId} has HasCustomMail=true, but active custom mail settings are missing or invalid.", companyId);
+            return null;
+        }
+
+        // When HasCustomMail is false (or company record not yet found), use system default from environment variables
+        var defaultSettings = GetSystemDefaultSettings(company?.Name);
+        if (defaultSettings is null)
+        {
+            _log.LogWarning("Company {CompanyId} is set to use system mail (HasCustomMail=false), but default mail environment variables are not configured.", companyId);
+        }
+        return defaultSettings;
     }
 }
 

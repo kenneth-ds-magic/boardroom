@@ -42,6 +42,7 @@ import {
   getSessions,
   revokeSession,
   revokeOtherSessions,
+  toggleCustomMail,
   logout,
   BASE
 } from '../api.js'
@@ -117,6 +118,9 @@ export default function Settings() {
     isActive: true
   })
   const [mailConfigured, setMailConfigured] = useState(false)
+  const [hasCustomMail, setHasCustomMail] = useState(false)
+  const [systemMailConfigured, setSystemMailConfigured] = useState(false)
+  const [systemMailInfo, setSystemMailInfo] = useState(null)
   const [savedMailProvider, setSavedMailProvider] = useState('')
   const [isMailEditing, setIsMailEditing] = useState(false)
   const [showMailPassword, setShowMailPassword] = useState(false)
@@ -154,6 +158,9 @@ export default function Settings() {
           website: c.website || ''
         })
         setIsAdmin(c.isAdmin ?? user?.role === 'Admin')
+        if (c.hasCustomMail !== undefined) {
+          setHasCustomMail(Boolean(c.hasCustomMail))
+        }
       }
     } catch (err) {
       say(err.message)
@@ -162,22 +169,27 @@ export default function Settings() {
     // 2. Load Mail Settings
     try {
       const s = await api('/mail-settings')
-      if (s.configured) {
-        setMailConfigured(true)
-        setSavedMailProvider(s.provider)
-        setMailForm({
-          provider: s.provider,
-          host: s.host,
-          port: s.port,
-          username: s.username,
-          password: s.password,
-          fromAddress: s.fromAddress,
-          fromName: s.fromName,
-          isActive: s.isActive
-        })
-        setIsMailEditing(false)
-      } else {
-        setIsMailEditing(true)
+      if (s) {
+        setHasCustomMail(Boolean(s.hasCustomMail))
+        setSystemMailConfigured(Boolean(s.systemMailConfigured))
+        setSystemMailInfo(s.systemMail || null)
+        if (s.configured) {
+          setMailConfigured(true)
+          setSavedMailProvider(s.provider)
+          setMailForm({
+            provider: s.provider,
+            host: s.host,
+            port: s.port,
+            username: s.username,
+            password: s.password,
+            fromAddress: s.fromAddress,
+            fromName: s.fromName,
+            isActive: s.isActive
+          })
+          setIsMailEditing(false)
+        } else {
+          setIsMailEditing(true)
+        }
       }
     } catch {
       // Mail settings might be unconfigured or restricted
@@ -485,18 +497,37 @@ export default function Settings() {
     }
   }
 
+  async function handleToggleCustomMail(enabled) {
+    setMailBusy(true)
+    try {
+      const res = await toggleCustomMail(enabled)
+      setHasCustomMail(res.hasCustomMail)
+      if (res.hasCustomMail) {
+        setIsMailEditing(true)
+        say('✨ Switched to Custom Company Mail Relay.')
+      } else {
+        say('✨ Switched to System Default Mail Relay (Environment variables).')
+      }
+    } catch (err) {
+      say(`Failed to update mail relay mode: ${err.message}`)
+    } finally {
+      setMailBusy(false)
+    }
+  }
+
   async function saveMail(e) {
     e.preventDefault()
     setMailBusy(true)
     try {
       await api('/mail-settings', {
         method: 'POST',
-        body: JSON.stringify({ ...mailForm, port: Number(mailForm.port) })
+        body: JSON.stringify({ ...mailForm, port: Number(mailForm.port), hasCustomMail: true })
       })
-      say('✨ Mail settings successfully updated & encrypted.')
+      setHasCustomMail(true)
       setMailConfigured(true)
       setSavedMailProvider(mailForm.provider)
       setIsMailEditing(false)
+      say('✨ Custom mail settings successfully saved and activated.')
     } catch (err) {
       say(err.message)
     } finally {
@@ -504,34 +535,40 @@ export default function Settings() {
     }
   }
 
-  async function sendTestEmail() {
+  async function sendTestEmail(useSystemDefault = false) {
     setMailBusy(true)
     setTestModalOpen(true)
-    setTestLogs([{ step: 1, text: `Initiating handshake with ${mailForm.provider} relay...`, status: 'pending' }])
+    const prov = useSystemDefault ? (systemMailInfo?.provider || 'System Default') : mailForm.provider
+    const modeLabel = useSystemDefault ? 'System Default Relay (Env)' : 'Custom Company Relay'
+    setTestLogs([{ step: 1, text: `Initiating handshake with ${prov} (${modeLabel})...`, status: 'pending' }])
 
     try {
       await new Promise(r => setTimeout(r, 600))
       setTestLogs([
-        { step: 1, text: `Initiating handshake with ${mailForm.provider} relay...`, status: 'done' },
-        { step: 2, text: 'Verifying TLS 1.3 encryption & certificates...', status: 'pending' }
+        { step: 1, text: `Initiating handshake with ${prov} (${modeLabel})...`, status: 'done' },
+        { step: 2, text: 'Verifying TLS encryption & transport handshake...', status: 'pending' }
       ])
 
       await new Promise(r => setTimeout(r, 700))
       setTestLogs([
-        { step: 1, text: `Initiating handshake with ${mailForm.provider} relay...`, status: 'done' },
-        { step: 2, text: 'Verifying TLS 1.3 encryption & certificates...', status: 'done' },
-        { step: 3, text: `Authenticating credentials & dispatching payload to ${user.email}...`, status: 'pending' }
+        { step: 1, text: `Initiating handshake with ${prov} (${modeLabel})...`, status: 'done' },
+        { step: 2, text: 'Verifying TLS encryption & transport handshake...', status: 'done' },
+        { step: 3, text: `Dispatching verification test to ${user.email}...`, status: 'pending' }
       ])
+
+      const payload = useSystemDefault
+        ? { useSystemDefault: true }
+        : { ...mailForm, port: Number(mailForm.port), useSystemDefault: false }
 
       const r = await api('/mail-settings/test', {
         method: 'POST',
-        body: JSON.stringify({ ...mailForm, port: Number(mailForm.port) })
+        body: JSON.stringify(payload)
       })
 
       await new Promise(r => setTimeout(r, 500))
       setTestLogs([
-        { step: 1, text: `Initiating handshake with ${mailForm.provider} relay...`, status: 'done' },
-        { step: 2, text: 'Verifying TLS 1.3 encryption & certificates...', status: 'done' },
+        { step: 1, text: `Initiating handshake with ${prov} (${modeLabel})...`, status: 'done' },
+        { step: 2, text: 'Verifying TLS encryption & transport handshake...', status: 'done' },
         { step: 3, text: r.message, status: 'done' }
       ])
       say(r.message)
@@ -547,12 +584,13 @@ export default function Settings() {
   }
 
   async function removeMail() {
-    if (!confirm('Are you sure you want to delete the active email dispatch configuration? BoardRoom will pause email notifications until a new provider is configured.'))
+    if (!confirm('Are you sure you want to delete the custom email configuration? The workspace will revert to using the system default mail server from environment variables.'))
       return
     setMailBusy(true)
     try {
       await api('/mail-settings', { method: 'DELETE' })
       setMailConfigured(false)
+      setHasCustomMail(false)
       setSavedMailProvider('')
       setMailForm({
         provider: 'SMTP',
@@ -565,7 +603,7 @@ export default function Settings() {
         isActive: true
       })
       setIsMailEditing(true)
-      say('Email configuration removed.')
+      say('✨ Custom mail settings removed. Reverted to system default mail (Environment variables).')
     } catch (err) {
       say(err.message)
     } finally {
@@ -615,23 +653,27 @@ export default function Settings() {
             </div>
           ) : activeTab === 'mail' ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {mailConfigured ? (
+              {!hasCustomMail ? (
+                <span className="settings-status-pill active" style={{ background: 'var(--bottle-tint)', color: 'var(--bottle)' }}>
+                  <span className="settings-status-dot"></span> System Default (Env) Active
+                </span>
+              ) : mailConfigured ? (
                 mailForm.isActive ? (
                   <span className="settings-status-pill active">
-                    <span className="settings-status-dot"></span> Operational & Active
+                    <span className="settings-status-dot"></span> Custom Relay Active
                   </span>
                 ) : (
                   <span className="settings-status-pill paused">
-                    <span className="settings-status-dot"></span> Paused
+                    <span className="settings-status-dot"></span> Custom Relay Paused
                   </span>
                 )
               ) : (
                 <span className="settings-status-pill unconfigured">
-                  <span className="settings-status-dot"></span> Setup Required
+                  <span className="settings-status-dot"></span> Custom Setup Required
                 </span>
               )}
 
-              {mailConfigured && (
+              {hasCustomMail && mailConfigured && (
                 <button
                   type="button"
                   className={`btn ${isMailEditing ? 'ghost' : 'secondary'}`}
@@ -847,124 +889,338 @@ export default function Settings() {
           TAB 2: MAIL & DISPATCH RELAY
           ========================================================================= */}
       {activeTab === 'mail' && (
-        <motion.form
-          key="tab-mail"
-          className="card form-card"
-          style={{ maxWidth: 760, margin: '0 auto' }}
-          onSubmit={saveMail}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          {!mailConfigured && (
+        <div style={{ maxWidth: 780, margin: '0 auto' }}>
+          {/* Strategy Selection Cards */}
+          <div className="mail-strategy-grid">
             <div
-              style={{
-                background: 'var(--brass-tint)',
-                color: 'var(--brass)',
-                padding: '14px 18px',
-                borderRadius: 10,
-                fontSize: '0.88rem',
-                marginBottom: 20,
-                border: '1px solid rgba(168, 127, 46, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10
+              className={`mail-strategy-card ${!hasCustomMail ? 'selected' : ''}`}
+              onClick={() => hasCustomMail && handleToggleCustomMail(false)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => {
+                if ((e.key === 'Enter' || e.key === ' ') && hasCustomMail) handleToggleCustomMail(false)
               }}
             >
-              <span style={{ fontSize: '1.2rem' }}>⚠️</span>
-              <div>
-                <strong>No Active Email Provider</strong>
-                <div style={{ fontSize: '0.82rem', marginTop: 2, opacity: 0.9 }}>
-                  BoardRoom requires a verified mail dispatch server to send meeting invitations, security tokens, PDF exports, and digital agendas.
-                </div>
-              </div>
-            </div>
-          )}
-
-          <label style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: 10, display: 'block', color: 'var(--ink)' }}>
-            Select Email Provider Protocol
-          </label>
-
-          <div
-            className={`grid2 ${!isMailEditing ? 'disabled' : ''}`}
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}
-          >
-            {mailProviders.map(p => {
-              const selected = mailForm.provider === p.id
-              return (
-                <div
-                  key={p.id}
-                  className={`provider-card-executive ${selected ? 'selected' : ''}`}
-                  onClick={() => handleProviderSelect(p.id)}
-                  role="button"
-                  tabIndex={isMailEditing ? 0 : -1}
-                  onKeyDown={e => {
-                    if (isMailEditing && (e.key === 'Enter' || e.key === ' ')) handleProviderSelect(p.id)
-                  }}
-                >
-                  <div className="provider-card-header">
-                    <div className="provider-icon-badge">{p.logo}</div>
-                    <span className="provider-badge-tag">{p.tag}</span>
-                  </div>
+              <div className="mail-strategy-header">
+                <div className="mail-strategy-title-wrap">
+                  <div className="mail-strategy-icon">🌐</div>
                   <div>
-                    <div className="provider-card-title">{p.name}</div>
-                    <p className="provider-card-sub">{p.sub}</p>
+                    <div className="mail-strategy-name">System Default Relay</div>
+                    <div className="mail-strategy-sub">Environment Variables (.env)</div>
                   </div>
                 </div>
-              )
-            })}
+                <span className={`mail-strategy-badge ${!hasCustomMail ? 'active' : ''}`}>
+                  {!hasCustomMail ? '● Active Strategy' : 'Fallback Ready'}
+                </span>
+              </div>
+              <p className="mail-strategy-desc">
+                Dispatches invites and alerts using centralized host environment variables (<code>SMTP_*</code> or <code>Mail:*</code>). Standard for global infrastructure.
+              </p>
+            </div>
+
+            <div
+              className={`mail-strategy-card ${hasCustomMail ? 'selected' : ''}`}
+              onClick={() => !hasCustomMail && handleToggleCustomMail(true)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => {
+                if ((e.key === 'Enter' || e.key === ' ') && !hasCustomMail) handleToggleCustomMail(true)
+              }}
+            >
+              <div className="mail-strategy-header">
+                <div className="mail-strategy-title-wrap">
+                  <div className="mail-strategy-icon">🏢</div>
+                  <div>
+                    <div className="mail-strategy-name">Custom Company Relay</div>
+                    <div className="mail-strategy-sub">Dedicated SMTP / Mailgun / SendGrid</div>
+                  </div>
+                </div>
+                <span className={`mail-strategy-badge ${hasCustomMail ? 'active' : ''}`}>
+                  {hasCustomMail ? '● Active Strategy' : 'Configurable'}
+                </span>
+              </div>
+              <p className="mail-strategy-desc">
+                Enables this company to send correspondence via custom domain SMTP, Mailgun, SendGrid, or Brevo credentials with AES-256 encryption.
+              </p>
+            </div>
           </div>
 
-          {/* Provider Specific Inputs */}
-          <AnimatePresence mode="wait">
+          {/* Conditional View: System Default Relay vs Custom Relay Form */}
+          {!hasCustomMail ? (
             <motion.div
-              key={mailForm.provider}
-              initial={{ opacity: 0, y: 6 }}
+              key="system-mail-view"
+              className="system-mail-panel"
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: 0.2 }}
             >
-              {mailForm.provider === 'SMTP' && (
-                <>
-                  <div className="grid2">
-                    <div>
-                      <label style={{ fontWeight: 600 }}>SMTP Hostname</label>
-                      <input
-                        value={mailForm.host}
-                        onChange={setM('host')}
-                        required
-                        placeholder="smtp.office365.com or smtp.gmail.com"
-                        disabled={!isMailEditing}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontWeight: 600 }}>SMTP Port</label>
-                      <input
-                        type="number"
-                        value={mailForm.port}
-                        onChange={setM('port')}
-                        required
-                        placeholder="587"
-                        disabled={!isMailEditing}
-                      />
+              <div className={`system-mail-status-banner ${systemMailConfigured ? 'ready' : 'warning'}`}>
+                <span style={{ fontSize: '1.3rem' }}>{systemMailConfigured ? '✅' : '⚠️'}</span>
+                <div>
+                  <strong>{systemMailConfigured ? 'System Mail Active (from Environment Variables)' : 'System Mail Incomplete'}</strong>
+                  <div style={{ fontSize: '0.82rem', marginTop: 3, opacity: 0.9 }}>
+                    {systemMailConfigured
+                      ? 'BoardRoom is currently using the server environment configuration to dispatch automated meeting invitations, notifications, and security codes.'
+                      : 'System environment variables (SMTP_HOST, SMTP_PORT, etc.) are missing or incomplete. Please set them in your .env or docker-compose.yml file, or switch to a Custom Company Relay.'}
+                  </div>
+                </div>
+              </div>
+
+              <label style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: 12, display: 'block', color: 'var(--ink)' }}>
+                Active System Relay Properties (Environment Variables)
+              </label>
+
+              <div className="system-mail-grid">
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Relay Protocol</div>
+                  <div className="system-mail-cell-val">{systemMailInfo?.provider || 'SMTP'}</div>
+                </div>
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Server Host / Endpoint</div>
+                  <div className="system-mail-cell-val">{systemMailInfo?.host || '(Defined in Environment)'}</div>
+                </div>
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Port / Encryption</div>
+                  <div className="system-mail-cell-val">{systemMailInfo?.port ? `${systemMailInfo.port} (TLS / STARTTLS)` : '587 (TLS)'}</div>
+                </div>
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Default From Address</div>
+                  <div className="system-mail-cell-val">{systemMailInfo?.fromAddress || '(Defined in Environment)'}</div>
+                </div>
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Sender Display Name</div>
+                  <div className="system-mail-cell-val">{systemMailInfo?.fromName || companyForm.name || 'BoardRoom Relay'}</div>
+                </div>
+                <div className="system-mail-cell">
+                  <div className="system-mail-cell-label">Credentials Source</div>
+                  <div className="system-mail-cell-val">Host .env / docker-compose</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={mailBusy}
+                  onClick={() => sendTestEmail(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  ⚡ Send Test via System Relay
+                </button>
+
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={mailBusy}
+                  onClick={() => handleToggleCustomMail(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  🏢 Configure Dedicated Company Relay
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.form
+              key="tab-mail-custom"
+              className="card form-card"
+              onSubmit={saveMail}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {!mailConfigured && (
+                <div
+                  style={{
+                    background: 'var(--brass-tint)',
+                    color: 'var(--brass)',
+                    padding: '14px 18px',
+                    borderRadius: 10,
+                    fontSize: '0.88rem',
+                    marginBottom: 20,
+                    border: '1px solid rgba(168, 127, 46, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10
+                  }}
+                >
+                  <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                  <div>
+                    <strong>Custom Provider Not Yet Saved</strong>
+                    <div style={{ fontSize: '0.82rem', marginTop: 2, opacity: 0.9 }}>
+                      Select a provider and enter your company credentials below, then click &apos;Save Configuration&apos;.
                     </div>
                   </div>
+                </div>
+              )}
 
-                  <div className="grid2" style={{ marginTop: 14 }}>
-                    <div>
-                      <label style={{ fontWeight: 600 }}>Username / Account Email</label>
-                      <input
-                        value={mailForm.username}
-                        onChange={setM('username')}
-                        placeholder="boardroom@yourcompany.com"
-                        autoComplete="off"
-                        disabled={!isMailEditing}
-                      />
+              <label style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: 10, display: 'block', color: 'var(--ink)' }}>
+                Select Email Provider Protocol
+              </label>
+
+              <div
+                className={`grid2 ${!isMailEditing ? 'disabled' : ''}`}
+                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}
+              >
+                {mailProviders.map(p => {
+                  const selected = mailForm.provider === p.id
+                  return (
+                    <div
+                      key={p.id}
+                      className={`provider-card-executive ${selected ? 'selected' : ''}`}
+                      onClick={() => handleProviderSelect(p.id)}
+                      role="button"
+                      tabIndex={isMailEditing ? 0 : -1}
+                      onKeyDown={e => {
+                        if (isMailEditing && (e.key === 'Enter' || e.key === ' ')) handleProviderSelect(p.id)
+                      }}
+                    >
+                      <div className="provider-card-header">
+                        <div className="provider-icon-badge">{p.logo}</div>
+                        <span className="provider-badge-tag">{p.tag}</span>
+                      </div>
+                      <div>
+                        <div className="provider-card-title">{p.name}</div>
+                        <p className="provider-card-sub">{p.sub}</p>
+                      </div>
                     </div>
+                  )
+                })}
+              </div>
+
+              {/* Provider Specific Inputs */}
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={mailForm.provider}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  {mailForm.provider === 'SMTP' && (
+                    <>
+                      <div className="grid2">
+                        <div>
+                          <label style={{ fontWeight: 600 }}>SMTP Hostname</label>
+                          <input
+                            value={mailForm.host}
+                            onChange={setM('host')}
+                            required
+                            placeholder="smtp.office365.com or smtp.gmail.com"
+                            disabled={!isMailEditing}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontWeight: 600 }}>SMTP Port</label>
+                          <input
+                            type="number"
+                            value={mailForm.port}
+                            onChange={setM('port')}
+                            required
+                            placeholder="587"
+                            disabled={!isMailEditing}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid2" style={{ marginTop: 14 }}>
+                        <div>
+                          <label style={{ fontWeight: 600 }}>Username / Account Email</label>
+                          <input
+                            value={mailForm.username}
+                            onChange={setM('username')}
+                            placeholder="boardroom@yourcompany.com"
+                            autoComplete="off"
+                            disabled={!isMailEditing}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontWeight: 600 }}>
+                            Password / App Secret{' '}
+                            <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(AES-256 Encrypted)</span>
+                          </label>
+                          <div className="input-password-group">
+                            <input
+                              type={showMailPassword ? 'text' : 'password'}
+                              value={mailForm.password}
+                              onChange={setM('password')}
+                              autoComplete="new-password"
+                              required={!isMailProviderSaved}
+                              disabled={!isMailEditing}
+                              placeholder={isMailProviderSaved ? '••••••••••••' : 'Enter password'}
+                            />
+                            <button
+                              type="button"
+                              className="input-eye-toggle"
+                              onClick={() => setShowMailPassword(v => !v)}
+                              title={showMailPassword ? 'Hide secret' : 'Show secret'}
+                            >
+                              {showMailPassword ? '👁️' : '🔒'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {mailForm.provider === 'Mailgun' && (
+                    <>
+                      <div className="grid2">
+                        <div>
+                          <label style={{ fontWeight: 600 }}>Mailgun Domain</label>
+                          <input
+                            value={mailForm.host}
+                            onChange={setM('host')}
+                            required
+                            placeholder="mg.yourcompany.com"
+                            disabled={!isMailEditing}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontWeight: 600 }}>API Region</label>
+                          <select
+                            value={mailForm.username || 'US'}
+                            onChange={setM('username')}
+                            disabled={!isMailEditing}
+                            style={{ padding: '8px 12px' }}
+                          >
+                            <option value="US">US Region (api.mailgun.net)</option>
+                            <option value="EU">EU Region (api.eu.mailgun.net)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 14 }}>
+                        <label style={{ fontWeight: 600 }}>
+                          Mailgun Secret API Key{' '}
+                          <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(key-...)</span>
+                        </label>
+                        <div className="input-password-group">
+                          <input
+                            type={showMailPassword ? 'text' : 'password'}
+                            value={mailForm.password}
+                            onChange={setM('password')}
+                            autoComplete="new-password"
+                            required={!isMailProviderSaved}
+                            disabled={!isMailEditing}
+                            placeholder={isMailProviderSaved ? '••••••••••••' : 'key-xxxxxxxxxxxxxxxx'}
+                          />
+                          <button
+                            type="button"
+                            className="input-eye-toggle"
+                            onClick={() => setShowMailPassword(v => !v)}
+                          >
+                            {showMailPassword ? '👁️' : '🔒'}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {(mailForm.provider === 'SendGrid' || mailForm.provider === 'Brevo') && (
                     <div>
                       <label style={{ fontWeight: 600 }}>
-                        Password / App Secret{' '}
-                        <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(AES-256 Encrypted)</span>
+                        {mailForm.provider} Secret API Key{' '}
+                        <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(SG.... or xkeysib-...)</span>
                       </label>
                       <div className="input-password-group">
                         <input
@@ -974,192 +1230,120 @@ export default function Settings() {
                           autoComplete="new-password"
                           required={!isMailProviderSaved}
                           disabled={!isMailEditing}
-                          placeholder={isMailProviderSaved ? '••••••••••••' : 'Enter password'}
+                          placeholder={isMailProviderSaved ? '••••••••••••' : 'Paste API Key'}
                         />
                         <button
                           type="button"
                           className="input-eye-toggle"
                           onClick={() => setShowMailPassword(v => !v)}
-                          title={showMailPassword ? 'Hide secret' : 'Show secret'}
                         >
                           {showMailPassword ? '👁️' : '🔒'}
                         </button>
                       </div>
                     </div>
-                  </div>
-                </>
-              )}
+                  )}
+                </motion.div>
+              </AnimatePresence>
 
-              {mailForm.provider === 'Mailgun' && (
-                <>
-                  <div className="grid2">
-                    <div>
-                      <label style={{ fontWeight: 600 }}>Mailgun Domain</label>
-                      <input
-                        value={mailForm.host}
-                        onChange={setM('host')}
-                        required
-                        placeholder="mg.yourcompany.com"
-                        disabled={!isMailEditing}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontWeight: 600 }}>API Region</label>
-                      <select
-                        value={mailForm.username || 'US'}
-                        onChange={setM('username')}
-                        disabled={!isMailEditing}
-                        style={{ padding: '8px 12px' }}
-                      >
-                        <option value="US">US Region (api.mailgun.net)</option>
-                        <option value="EU">EU Region (api.eu.mailgun.net)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 14 }}>
-                    <label style={{ fontWeight: 600 }}>
-                      Mailgun Secret API Key{' '}
-                      <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(key-...)</span>
-                    </label>
-                    <div className="input-password-group">
-                      <input
-                        type={showMailPassword ? 'text' : 'password'}
-                        value={mailForm.password}
-                        onChange={setM('password')}
-                        autoComplete="new-password"
-                        required={!isMailProviderSaved}
-                        disabled={!isMailEditing}
-                        placeholder={isMailProviderSaved ? '••••••••••••' : 'key-xxxxxxxxxxxxxxxx'}
-                      />
-                      <button
-                        type="button"
-                        className="input-eye-toggle"
-                        onClick={() => setShowMailPassword(v => !v)}
-                      >
-                        {showMailPassword ? '👁️' : '🔒'}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {(mailForm.provider === 'SendGrid' || mailForm.provider === 'Brevo') && (
+              <div className="grid2" style={{ marginTop: 16 }}>
                 <div>
-                  <label style={{ fontWeight: 600 }}>
-                    {mailForm.provider} Secret API Key{' '}
-                    <span style={{ color: 'var(--ink-soft)', fontWeight: 400, fontSize: '0.78rem' }}>(SG.... or xkeysib-...)</span>
-                  </label>
-                  <div className="input-password-group">
-                    <input
-                      type={showMailPassword ? 'text' : 'password'}
-                      value={mailForm.password}
-                      onChange={setM('password')}
-                      autoComplete="new-password"
-                      required={!isMailProviderSaved}
-                      disabled={!isMailEditing}
-                      placeholder={isMailProviderSaved ? '••••••••••••' : 'Paste API Key'}
-                    />
-                    <button
-                      type="button"
-                      className="input-eye-toggle"
-                      onClick={() => setShowMailPassword(v => !v)}
-                    >
-                      {showMailPassword ? '👁️' : '🔒'}
-                    </button>
+                  <label style={{ fontWeight: 600 }}>Sender Email (From Address)</label>
+                  <input
+                    type="email"
+                    value={mailForm.fromAddress}
+                    onChange={setM('fromAddress')}
+                    required
+                    placeholder="boardroom@yourcompany.com"
+                    disabled={!isMailEditing}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 600 }}>Sender Display Name</label>
+                  <input
+                    value={mailForm.fromName}
+                    onChange={setM('fromName')}
+                    placeholder="BoardRoom Corporate Office"
+                    disabled={!isMailEditing}
+                  />
+                </div>
+              </div>
+
+              {/* Active Switch Toggle Card */}
+              <div
+                style={{
+                  background: 'var(--paper)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  padding: '14px 18px',
+                  margin: '18px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  opacity: !isMailEditing ? 0.8 : 1
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--ink)' }}>Enable Dispatch Server</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--ink-soft)' }}>
+                    When toggled on, BoardRoom dispatches automated meeting invites and agenda emails through this company relay.
                   </div>
                 </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
 
-          <div className="grid2" style={{ marginTop: 16 }}>
-            <div>
-              <label style={{ fontWeight: 600 }}>Sender Email (From Address)</label>
-              <input
-                type="email"
-                value={mailForm.fromAddress}
-                onChange={setM('fromAddress')}
-                required
-                placeholder="boardroom@yourcompany.com"
-                disabled={!isMailEditing}
-              />
-            </div>
-            <div>
-              <label style={{ fontWeight: 600 }}>Sender Display Name</label>
-              <input
-                value={mailForm.fromName}
-                onChange={setM('fromName')}
-                placeholder="BoardRoom Corporate Office"
-                disabled={!isMailEditing}
-              />
-            </div>
-          </div>
-
-          {/* Active Switch Toggle Card */}
-          <div
-            style={{
-              background: 'var(--paper)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              padding: '14px 18px',
-              margin: '18px 0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              opacity: !isMailEditing ? 0.8 : 1
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--ink)' }}>Enable Dispatch Server</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--ink-soft)' }}>
-                When toggled on, BoardRoom dispatches automated meeting invites and agenda emails through this relay.
+                <label className="switch" style={{ flexShrink: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={mailForm.isActive}
+                    onChange={setM('isActive')}
+                    disabled={!isMailEditing}
+                  />
+                  <span className="slider"></span>
+                </label>
               </div>
-            </div>
 
-            <label className="switch" style={{ flexShrink: 0 }}>
-              <input
-                type="checkbox"
-                checked={mailForm.isActive}
-                onChange={setM('isActive')}
-                disabled={!isMailEditing}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+              {/* Action Footer */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  {isMailEditing && (
+                    <button type="submit" className="btn" disabled={mailBusy}>
+                      {mailBusy ? 'Saving...' : mailConfigured ? '💾 Update Configuration' : '✨ Save Configuration'}
+                    </button>
+                  )}
 
-          {/* Action Footer */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {isMailEditing && (
-                <button type="submit" className="btn" disabled={mailBusy}>
-                  {mailBusy ? 'Saving...' : mailConfigured ? '💾 Update Configuration' : '✨ Save Configuration'}
-                </button>
-              )}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={mailBusy}
+                    onClick={() => sendTestEmail(false)}
+                  >
+                    ⚡ Send Live Test Email
+                  </button>
 
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={mailBusy}
-                onClick={sendTestEmail}
-              >
-                ⚡ Send Live Test Email
-              </button>
-            </div>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={mailBusy}
+                    onClick={() => handleToggleCustomMail(false)}
+                    title="Switch back to system environment variables relay"
+                  >
+                    🌐 Use System Default Relay
+                  </button>
+                </div>
 
-            {mailConfigured && isMailEditing && (
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ color: 'var(--danger)', borderColor: 'rgba(140,47,47,0.3)' }}
-                disabled={mailBusy}
-                onClick={removeMail}
-              >
-                🗑️ Delete Config
-              </button>
-            )}
-          </div>
-        </motion.form>
+                {mailConfigured && isMailEditing && (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    style={{ color: 'var(--danger)', borderColor: 'rgba(140,47,47,0.3)' }}
+                    disabled={mailBusy}
+                    onClick={removeMail}
+                  >
+                    🗑️ Delete Config
+                  </button>
+                )}
+              </div>
+            </motion.form>
+          )}
+        </div>
       )}
 
       {/* =========================================================================

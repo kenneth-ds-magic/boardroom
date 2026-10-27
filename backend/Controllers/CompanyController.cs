@@ -14,7 +14,8 @@ public record UpdateCompanyRequest(
     string? Phone,
     string? Address,
     string? Website,
-    Guid? CompanyId = null
+    Guid? CompanyId = null,
+    bool? HasCustomMail = null
 );
 
 public record CreateCompanyRequest(
@@ -23,7 +24,8 @@ public record CreateCompanyRequest(
     string? Email,
     string? Phone,
     string? Address,
-    string? Website
+    string? Website,
+    bool? HasCustomMail = null
 );
 
 
@@ -68,6 +70,7 @@ public class CompanyController : ControllerBase
             company.Phone,
             company.Address,
             company.Website,
+            company.HasCustomMail,
             HasLogo = !string.IsNullOrEmpty(company.LogoObjectName),
             LogoUrl = !string.IsNullOrEmpty(company.LogoObjectName) ? $"/api/company/logo?companyId={company.Id}&t={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}" : null,
             company.CreatedAt,
@@ -99,7 +102,8 @@ public class CompanyController : ControllerBase
             Email = req.Email?.Trim(),
             Phone = req.Phone?.Trim(),
             Address = req.Address?.Trim(),
-            Website = req.Website?.Trim()
+            Website = req.Website?.Trim(),
+            HasCustomMail = req.HasCustomMail ?? false
         };
 
         _db.Companies.Add(company);
@@ -121,14 +125,14 @@ public class CompanyController : ControllerBase
             .AsNoTracking()
             .Include(m => m.Company)
             .Where(m => m.UserId == userId && m.Status == UserStatus.Active)
-            .OrderBy(m => m.Company.Name)
+            .OrderBy(m => m.Company != null ? m.Company.Name : "")
             .Select(m => new
             {
                 m.CompanyId,
-                CompanyName = m.Company.Name,
+                CompanyName = m.Company != null ? m.Company.Name : "",
                 Role = m.Role.ToString(),
                 m.Title,
-                HasLogo = !string.IsNullOrEmpty(m.Company.LogoObjectName)
+                HasLogo = m.Company != null && !string.IsNullOrEmpty(m.Company.LogoObjectName)
             })
             .ToListAsync(ct);
 
@@ -141,6 +145,7 @@ public class CompanyController : ControllerBase
             phone = company.Phone,
             address = company.Address,
             website = company.Website,
+            hasCustomMail = company.HasCustomMail,
             HasLogo = !string.IsNullOrEmpty(company.LogoObjectName),
             companies = memberships
         });
@@ -178,6 +183,7 @@ public class CompanyController : ControllerBase
         company.Phone = req.Phone?.Trim();
         company.Address = req.Address?.Trim();
         company.Website = req.Website?.Trim();
+        if (req.HasCustomMail.HasValue) company.HasCustomMail = req.HasCustomMail.Value;
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("company.details.updated", "Company", company.Id, $"Updated company details from '{oldName}' to '{company.Name}'.", userId);
@@ -186,14 +192,14 @@ public class CompanyController : ControllerBase
             .AsNoTracking()
             .Include(m => m.Company)
             .Where(m => m.UserId == userId && m.Status == UserStatus.Active)
-            .OrderBy(m => m.Company.Name)
+            .OrderBy(m => m.Company != null ? m.Company.Name : "")
             .Select(m => new
             {
                 m.CompanyId,
-                CompanyName = m.Company.Name,
+                CompanyName = m.Company != null ? m.Company.Name : "",
                 Role = m.Role.ToString(),
                 m.Title,
-                HasLogo = !string.IsNullOrEmpty(m.Company.LogoObjectName)
+                HasLogo = m.Company != null && !string.IsNullOrEmpty(m.Company.LogoObjectName)
             })
             .ToListAsync();
 
@@ -206,6 +212,7 @@ public class CompanyController : ControllerBase
             company.Phone,
             company.Address,
             company.Website,
+            company.HasCustomMail,
             HasLogo = !string.IsNullOrEmpty(company.LogoObjectName),
             LogoUrl = !string.IsNullOrEmpty(company.LogoObjectName) ? $"/api/company/logo?companyId={company.Id}&t={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}" : null,
             company.CreatedAt,
