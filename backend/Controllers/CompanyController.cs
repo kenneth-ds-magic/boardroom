@@ -103,7 +103,7 @@ public class CompanyController : ControllerBase
             Phone = req.Phone?.Trim(),
             Address = req.Address?.Trim(),
             Website = req.Website?.Trim(),
-            HasCustomMail = req.HasCustomMail ?? false
+            HasCustomMail = false
         };
 
         _db.Companies.Add(company);

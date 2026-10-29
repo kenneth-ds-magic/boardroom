@@ -42,7 +42,7 @@ public class MailSettingsController : ControllerBase
         var s = await _db.CompanyMailSettings.AsNoTracking()
             .FirstOrDefaultAsync(x => x.CompanyId == companyId);
 
-        var defaultSettings = _resolver.GetSystemDefaultSettings(company.Name);
+        var defaultSettings = await _resolver.ResolveSystemDefaultSettingsAsync(companyId, User.UserId());
         var systemMail = defaultSettings is not null ? new
         {
             configured = true,
@@ -176,7 +176,7 @@ public class MailSettingsController : ControllerBase
             ResolvedMailSettings settings;
             if (req.UseSystemDefault)
             {
-                var sys = _resolver.GetSystemDefaultSettings(company.Name);
+                var sys = await _resolver.ResolveSystemDefaultSettingsAsync(companyId, User.UserId());
                 if (sys is null)
                     return BadRequest(new { error = "System default mail is not configured in the server environment variables." });
                 settings = sys;

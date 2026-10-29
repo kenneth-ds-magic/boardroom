@@ -5,6 +5,7 @@ namespace BoardRoom.Api.Events;
 public abstract record DomainEvent
 {
     public DateTime OccurredAt { get; } = DateTime.UtcNow;
+    public Guid? TriggeredByUserId { get; init; }
 }
 
 // The six notification triggers

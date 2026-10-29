@@ -141,7 +141,7 @@ public class MeetingsController : ControllerBase
         m.Status = MeetingStatus.Scheduled;
         await _db.SaveChangesAsync();
         await _audit.LogAsync("meeting.invites_sent", "Meeting", m.Id, null, User.UserId());
-        await _bus.PublishAsync(new MeetingScheduled(m.Id, IsUpdate: false)); // trigger 1
+        await _bus.PublishAsync(new MeetingScheduled(m.Id, IsUpdate: false) { TriggeredByUserId = User.UserId() }); // trigger 1
         return Ok();
     }
 
@@ -159,7 +159,7 @@ public class MeetingsController : ControllerBase
         m.HasUnsentUpdates = false;
         await _db.SaveChangesAsync();
         await _audit.LogAsync("meeting.updates_sent", "Meeting", m.Id, null, User.UserId());
-        await _bus.PublishAsync(new MeetingScheduled(m.Id, IsUpdate: true));
+        await _bus.PublishAsync(new MeetingScheduled(m.Id, IsUpdate: true) { TriggeredByUserId = User.UserId() });
         return Ok();
     }
 
@@ -251,7 +251,7 @@ public class MeetingsController : ControllerBase
         m.Status = MeetingStatus.Completed;
         await _db.SaveChangesAsync();
         await _audit.LogAsync("minutes.finalized", "Meeting", m.Id, null, User.UserId());
-        await _bus.PublishAsync(new MinutesFinalized(m.Id)); // trigger 3, automatic on status change
+        await _bus.PublishAsync(new MinutesFinalized(m.Id) { TriggeredByUserId = User.UserId() }); // trigger 3, automatic on status change
         return Ok();
     }
 

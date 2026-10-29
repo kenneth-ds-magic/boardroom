@@ -27,6 +27,7 @@ public interface IEmailService
     /// </summary>
     Task SendAsync(Guid companyId, EmailRecipient recipient, string subject, string templateKey, string htmlBody,
                    IReadOnlyList<EmailLink> links, IEnumerable<(string fileName, byte[] content, string mime)>? attachments = null,
+                   Guid? senderUserId = null,
                    CancellationToken ct = default);
 
     /// <summary>
@@ -45,13 +46,20 @@ public class MailSettingsResolver
     private readonly AppDbContext _db;
     private readonly IDataProtector _protector;
     private readonly IConfiguration _cfg;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<MailSettingsResolver> _log;
 
-    public MailSettingsResolver(AppDbContext db, IDataProtectionProvider dp, IConfiguration cfg, ILogger<MailSettingsResolver> log)
+    public MailSettingsResolver(
+        AppDbContext db,
+        IDataProtectionProvider dp,
+        IConfiguration cfg,
+        IHttpContextAccessor httpContextAccessor,
+        ILogger<MailSettingsResolver> log)
     {
         _db = db;
         _protector = dp.CreateProtector(ProtectorPurpose);
         _cfg = cfg;
+        _httpContextAccessor = httpContextAccessor;
         _log = log;
     }
 
@@ -59,10 +67,60 @@ public class MailSettingsResolver
     public string Unprotect(string cipher) => string.IsNullOrEmpty(cipher) ? "" : _protector.Unprotect(cipher);
 
     /// <summary>
-    /// Resolves the system-wide default mail configuration from environment variables.
-    /// Supports standard .NET config (Mail:Host, Mail:Port, etc.) as well as standard SMTP env vars (SMTP_HOST, etc.).
+    /// Formats a company name so that each word's first letter is capitalized (Title Case).
     /// </summary>
-    public ResolvedMailSettings? GetSystemDefaultSettings(string? fallbackFromName = null)
+    public static string FormatTitleCase(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var words = text.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+        {
+            var w = words[i];
+            if (w.Length == 1)
+                words[i] = char.ToUpper(w[0], culture).ToString();
+            else
+                words[i] = char.ToUpper(w[0], culture) + w.Substring(1).ToLower(culture);
+        }
+        return string.Join(" ", words);
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        try
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user is null) return null;
+            var val = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(val, out var id) ? id : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string? GetCurrentUserEmail()
+    {
+        try
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user is null) return null;
+            return user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the system-wide default mail configuration from environment variables.
+    /// For ONLY the environment mailing option:
+    /// - smtp_from_name should be the active user company with each word first letter capital.
+    /// - from_address should be the active user email.
+    /// </summary>
+    public ResolvedMailSettings? GetSystemDefaultSettings(string? companyName = null, string? activeUserEmail = null)
     {
         var provider = _cfg["Mail:Provider"]
             ?? _cfg["MAIL_PROVIDER"]
@@ -92,18 +150,32 @@ public class MailSettingsResolver
             ?? _cfg["MAIL_PASSWORD"]
             ?? "";
 
-        var fromAddress = _cfg["Mail:FromAddress"]
+        var envFromAddress = _cfg["Mail:FromAddress"]
             ?? _cfg["SMTP_FROM_ADDRESS"]
             ?? _cfg["SMTP_FROM_EMAIL"]
             ?? _cfg["MAIL_FROM_ADDRESS"]
             ?? _cfg["MAIL_FROM"]
             ?? "";
 
-        var fromName = _cfg["Mail:FromName"]
+        // For environment mailing option: from address should be active user email
+        var effectiveUserEmail = !string.IsNullOrWhiteSpace(activeUserEmail)
+            ? activeUserEmail.Trim()
+            : GetCurrentUserEmail();
+
+        var fromAddress = !string.IsNullOrWhiteSpace(effectiveUserEmail)
+            ? effectiveUserEmail
+            : envFromAddress;
+
+        // For environment mailing option: smtp_from_name should be active user company with each word first letter capital
+        var envFromName = _cfg["Mail:FromName"]
             ?? _cfg["SMTP_FROM_NAME"]
             ?? _cfg["MAIL_FROM_NAME"]
-            ?? fallbackFromName
             ?? "BoardRoom";
+
+        var formattedCompanyName = FormatTitleCase(companyName);
+        var fromName = !string.IsNullOrWhiteSpace(formattedCompanyName)
+            ? formattedCompanyName
+            : FormatTitleCase(envFromName);
 
         if (string.IsNullOrWhiteSpace(fromAddress))
         {
@@ -119,7 +191,7 @@ public class MailSettingsResolver
         return new ResolvedMailSettings(provider, host, port, username, password, fromAddress, fromName);
     }
 
-    public async Task<ResolvedMailSettings?> ResolveAsync(Guid companyId, CancellationToken ct = default)
+    public async Task<ResolvedMailSettings?> ResolveAsync(Guid companyId, Guid? senderUserId = null, CancellationToken ct = default)
     {
         var company = await _db.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.Id == companyId, ct);
         if (company is not null && company.HasCustomMail)
@@ -135,13 +207,38 @@ public class MailSettingsResolver
             return null;
         }
 
-        // When HasCustomMail is false (or company record not yet found), use system default from environment variables
-        var defaultSettings = GetSystemDefaultSettings(company?.Name);
+        // For ONLY the environment mailing option:
+        var effectiveUserId = senderUserId ?? GetCurrentUserId();
+        string? activeUserEmail = null;
+        if (effectiveUserId.HasValue)
+        {
+            activeUserEmail = await _db.Users.AsNoTracking()
+                .Where(u => u.Id == effectiveUserId.Value)
+                .Select(u => u.Email)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        var defaultSettings = GetSystemDefaultSettings(company?.Name, activeUserEmail);
         if (defaultSettings is null)
         {
             _log.LogWarning("Company {CompanyId} is set to use system mail (HasCustomMail=false), but default mail environment variables are not configured.", companyId);
         }
         return defaultSettings;
+    }
+
+    public async Task<ResolvedMailSettings?> ResolveSystemDefaultSettingsAsync(Guid companyId, Guid? senderUserId = null, CancellationToken ct = default)
+    {
+        var company = await _db.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.Id == companyId, ct);
+        var effectiveUserId = senderUserId ?? GetCurrentUserId();
+        string? activeUserEmail = null;
+        if (effectiveUserId.HasValue)
+        {
+            activeUserEmail = await _db.Users.AsNoTracking()
+                .Where(u => u.Id == effectiveUserId.Value)
+                .Select(u => u.Email)
+                .FirstOrDefaultAsync(ct);
+        }
+        return GetSystemDefaultSettings(company?.Name, activeUserEmail);
     }
 }
 
@@ -162,7 +259,9 @@ public class SmtpEmailService : IEmailService
 
     public async Task SendAsync(Guid companyId, EmailRecipient recipient, string subject, string templateKey,
         string htmlBody, IReadOnlyList<EmailLink> links,
-        IEnumerable<(string fileName, byte[] content, string mime)>? attachments = null, CancellationToken ct = default)
+        IEnumerable<(string fileName, byte[] content, string mime)>? attachments = null,
+        Guid? senderUserId = null,
+        CancellationToken ct = default)
     {
         var log = new EmailLog
         {
@@ -174,7 +273,7 @@ public class SmtpEmailService : IEmailService
             LinksJson = JsonSerializer.Serialize(links.Select(l => l.Url))
         };
 
-        var settings = await _resolver.ResolveAsync(companyId, ct);
+        var settings = await _resolver.ResolveAsync(companyId, senderUserId, ct);
         if (settings is null)
         {
             log.Status = "Skipped";
@@ -189,6 +288,7 @@ public class SmtpEmailService : IEmailService
                 {
                     var msg = new MimeMessage();
                     msg.From.Add(new MailboxAddress(settings.FromName, settings.FromAddress));
+                    msg.ReplyTo.Add(new MailboxAddress(settings.FromName, settings.FromAddress));
                     msg.To.Add(new MailboxAddress(recipient.Name, recipient.Email)); // individual send — no BCC
                     msg.Subject = subject;
                     var builder = new BodyBuilder { HtmlBody = htmlBody, TextBody = HtmlToText(htmlBody) };

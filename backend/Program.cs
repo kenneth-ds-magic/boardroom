@@ -38,6 +38,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddSingleton<IEventBus, ChannelEventBus>();
 builder.Services.AddSingleton<FileStorageService>();
@@ -180,7 +181,7 @@ static class Seed
     {
         if (db.Users.Any()) return;
 
-        var demo = new Company { Name = "Demo Company Ltd", RegistrationDetails = "Seeded on first run" };
+        var demo = new Company { Name = "Demo Company Ltd", RegistrationDetails = "Seeded on first run", HasCustomMail = false };
         db.Companies.Add(demo);
 
         var admin = new User { Name = "System Admin", Email = "admin@example.com",

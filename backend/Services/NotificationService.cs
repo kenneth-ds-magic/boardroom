@@ -69,7 +69,9 @@ public class NotificationService
             await _email.SendAsync(m.CompanyId, rcpt,
                 $"[{m.MeetingCode}] {(e.IsUpdate ? "Updated" : "Invitation")}: {m.Title}",
                 e.IsUpdate ? "meeting.updated" : "meeting.scheduled", body, links,
-                new[] { ("invite.ics", ics, "text/calendar") }, ct);
+                new[] { ("invite.ics", ics, "text/calendar") },
+                senderUserId: e.TriggeredByUserId ?? m.CreatedById,
+                ct: ct);
             att.InviteSentAt = DateTime.UtcNow;
         }
         await _db.SaveChangesAsync(ct);
@@ -98,7 +100,9 @@ public class NotificationService
             var body = EmailTemplates.Layout($"Board papers for {m.Title}",
                 $"<p><strong>{m.MeetingCode}</strong> &middot; {m.ScheduledAtUtc:d MMMM yyyy}</p><ul>{summary}</ul>", links);
             await _email.SendAsync(m.CompanyId, rcpt, $"[{m.MeetingCode}] Board papers available",
-                "papers.distributed", body, links, null, ct);
+                "papers.distributed", body, links, null,
+                senderUserId: e.TriggeredByUserId ?? m.CreatedById,
+                ct: ct);
         }
     }
 
@@ -140,7 +144,9 @@ public class NotificationService
                 var body = EmailTemplates.Layout($"Minutes finalized: {m.Title}",
                     $"<p><strong>{m.MeetingCode}</strong> &middot; {m.ScheduledAtUtc:d MMMM yyyy}</p>{actionsHtml}", links);
                 await _email.SendAsync(m.CompanyId, rcpt, $"[{m.MeetingCode}] Minutes finalized",
-                    "minutes.finalized", body, links, attachments, ct);
+                    "minutes.finalized", body, links, attachments,
+                    senderUserId: e.TriggeredByUserId ?? m.MinutesFinalizedById ?? m.CreatedById,
+                    ct: ct);
             }
         }
         finally
@@ -167,7 +173,9 @@ public class NotificationService
             <p>From <strong>{a.Meeting.MeetingCode}</strong>{(a.DueDate != null ? $" &middot; due {a.DueDate.Value:d MMMM yyyy}" : "")}</p>
             """, links);
         await _email.SendAsync(a.Meeting.CompanyId, rcpt,
-            $"[{a.Meeting.MeetingCode}] Action point assigned to you", "action.assigned", body, links, null, ct);
+            $"[{a.Meeting.MeetingCode}] Action point assigned to you", "action.assigned", body, links, null,
+            senderUserId: e.TriggeredByUserId ?? a.Meeting.CreatedById,
+            ct: ct);
     }
 
     // 5. Due soon — 3 days and 1 day before deadline (raised by ActionPointReminderService)
@@ -188,7 +196,9 @@ public class NotificationService
             <p>Due <strong>{a.DueDate:d MMMM yyyy}</strong> &middot; {a.Meeting.MeetingCode}</p>
             """, links);
         await _email.SendAsync(a.Meeting.CompanyId, rcpt,
-            $"[{a.Meeting.MeetingCode}] Action due {a.DueDate:d MMM}", "action.due_soon", body, links, null, ct);
+            $"[{a.Meeting.MeetingCode}] Action due {a.DueDate:d MMM}", "action.due_soon", body, links, null,
+            senderUserId: e.TriggeredByUserId ?? a.Meeting.CreatedById,
+            ct: ct);
     }
 
     // 6. Completed — notify meeting chairs (user attendees) plus company Admins/Secretaries
@@ -218,7 +228,9 @@ public class NotificationService
                 <p>Completed by <strong>{System.Net.WebUtility.HtmlEncode(assigneeName)}</strong> &middot; {a.Meeting.MeetingCode}</p>
                 """, links);
             await _email.SendAsync(a.Meeting.CompanyId, rcpt,
-                $"[{a.Meeting.MeetingCode}] Action point completed", "action.completed", body, links, null, ct);
+                $"[{a.Meeting.MeetingCode}] Action point completed", "action.completed", body, links, null,
+                senderUserId: e.TriggeredByUserId ?? a.AssigneeId ?? a.Meeting.CreatedById,
+                ct: ct);
         }
     }
 
@@ -270,7 +282,9 @@ public class NotificationService
 
             await _email.SendAsync(m.CompanyId, rcpt,
                 $"[{m.MeetingCode}] Board Papers: {m.Title}",
-                "papers.attachments", body, links, attachments, ct);
+                "papers.attachments", body, links, attachments,
+                senderUserId: e.TriggeredByUserId ?? m.CreatedById,
+                ct: ct);
         }
     }
 

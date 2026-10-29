@@ -98,7 +98,7 @@ public class PapersController : ControllerBase
     {
         if (!await _db.Meetings.AnyAsync(m => m.Id == meetingId && m.CompanyId == User.CompanyId())) return NotFound();
         await _audit.LogAsync("papers.distributed", "Meeting", meetingId, new { req.PaperIds, req.RecipientUserIds }, User.UserId());
-        await _bus.PublishAsync(new PapersDistributed(meetingId, req.PaperIds, req.RecipientUserIds)); // trigger 2
+        await _bus.PublishAsync(new PapersDistributed(meetingId, req.PaperIds, req.RecipientUserIds) { TriggeredByUserId = User.UserId() }); // trigger 2
         return Ok();
     }
 
@@ -119,7 +119,7 @@ public record EmailAttachmentsRequest(List<Guid>? PaperIds);
 
         var paperIds = req?.PaperIds;
         await _audit.LogAsync("papers.emailed_attachments", "Meeting", meetingId, new { paperIds }, User.UserId());
-        await _bus.PublishAsync(new EmailPapersAttachments(meetingId, paperIds));
+        await _bus.PublishAsync(new EmailPapersAttachments(meetingId, paperIds) { TriggeredByUserId = User.UserId() });
         return Ok();
     }
 
@@ -206,7 +206,7 @@ public class ActionPointsController : ControllerBase
         _db.ActionPoints.Add(a);
         await _db.SaveChangesAsync();
         await _audit.LogAsync("action.created", "ActionPoint", a.Id, new { a.Description, a.AssigneeId, a.ContactId, a.DueDate }, User.UserId());
-        await _bus.PublishAsync(new ActionPointAssigned(a.Id)); // trigger 4
+        await _bus.PublishAsync(new ActionPointAssigned(a.Id) { TriggeredByUserId = User.UserId() }); // trigger 4
         return Ok(new { a.Id });
     }
 
@@ -232,7 +232,7 @@ public class ActionPointsController : ControllerBase
         a.CompletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         await _audit.LogAsync("action.completed", "ActionPoint", a.Id, null, User.UserId());
-        await _bus.PublishAsync(new ActionPointCompleted(a.Id)); // trigger 6
+        await _bus.PublishAsync(new ActionPointCompleted(a.Id) { TriggeredByUserId = User.UserId() }); // trigger 6
         return Ok();
     }
 }

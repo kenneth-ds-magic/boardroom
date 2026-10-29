@@ -63,7 +63,12 @@ public class AuthController : ControllerBase
             _db.Users.Add(user);
         }
 
-        var company = new Company { Name = req.CompanyName.Trim(), RegistrationDetails = req.RegistrationDetails?.Trim() ?? "" };
+        var company = new Company
+        {
+            Name = req.CompanyName.Trim(),
+            RegistrationDetails = req.RegistrationDetails?.Trim() ?? "",
+            HasCustomMail = false
+        };
         _db.Companies.Add(company);
         _db.CompanyMemberships.Add(new CompanyMembership
         {
@@ -333,7 +338,8 @@ public class AuthController : ControllerBase
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name, user.Name)
+            new(ClaimTypes.Name, user.Name),
+            new(ClaimTypes.Email, user.Email)
         };
         if (purposeSelect)
             claims.Add(new Claim("purpose", "select"));
